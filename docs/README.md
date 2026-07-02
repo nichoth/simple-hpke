@@ -26,8 +26,9 @@ Wrap an AES key to your public key.
   (its raw bytes are sealed).
 - `opts`: `HpkeOpts` — optional `keysize` and `info`.
 
-**Returns:** An object with `wrapped` (the envelope bytes) and `key` (the
-AES-GCM `CryptoKey` — same as input if provided, or newly generated).
+**Returns:** An object with `wrapped` (the envelope bytes) and `key` (a
+usable AES-GCM `CryptoKey` — for a supplied `aesKey`, a re-import of the same
+key bytes with encrypt/decrypt usages; otherwise the newly generated key).
 
 ### open
 
@@ -35,7 +36,7 @@ AES-GCM `CryptoKey` — same as input if provided, or newly generated).
 open(
     keypair:CryptoKeyPair,
     wrapped:Uint8Array,
-    opts?:{ info? }
+    opts?:{ info?:Uint8Array|string }
 ):Promise<CryptoKey>
 ```
 
@@ -83,7 +84,7 @@ schedule.
 
 ```ts
 import { seal, open } from '@substrate-system/ecies'
-import { EccKeys } from '@substrate-system/keys'
+import { EccKeys } from '@substrate-system/keys/ecc'
 
 // Create a fresh keypair
 const keys = await EccKeys.create()
@@ -106,7 +107,7 @@ const recovered = await open(keypair, wrapped)
 ```ts
 import { seal, open } from '@substrate-system/ecies'
 
-// Suppose you have an existing AES-GCM key
+// Suppose you have an existing AES-GCM key (see "Generate a new key" for keypair)
 const myKey = await crypto.subtle.importKey(
     'raw',
     new Uint8Array(32),
@@ -125,6 +126,7 @@ const recovered = await open(keypair, wrapped)
 ### With domain separation (info)
 
 ```ts
+// keypair and aesKey from examples above
 const { wrapped } = await seal(keypair, aesKey, {
     info:'my-app:v1'
 })
