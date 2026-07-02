@@ -225,3 +225,86 @@ test('AC2.2: EccKeys getters assemble working keypair',
         )
     }
 )
+
+// ===== TASK 2: Negative / integrity tests =====
+
+test('AC3.1: tampered envelope causes open to reject', async t => {
+    const kp = await genKeypair()
+    const { wrapped } = await seal(kp)
+
+    const copy = new Uint8Array(wrapped)
+    copy[copy.length - 1] ^= 0xff
+
+    let threw = false
+    try {
+        await open(kp, copy)
+    } catch (_e) {
+        threw = true
+    }
+
+    t.ok(threw, 'tampered envelope rejected')
+})
+
+test('AC3.2: wrong keypair causes open to reject', async t => {
+    const kpA = await genKeypair()
+    const kpB = await genKeypair()
+
+    const { wrapped } = await seal(kpA)
+
+    let threw = false
+    try {
+        await open(kpB, wrapped)
+    } catch (_e) {
+        threw = true
+    }
+
+    t.ok(threw, 'wrong keypair rejected')
+})
+
+test('AC3.3: mismatched info causes rejection, matching succeeds',
+    async t => {
+        const kp = await genKeypair()
+
+        // Seal with 'context-a'
+        const { wrapped } = await seal(kp, null, { info:'context-a' })
+
+        // Attempt open with mismatched 'context-b'
+        let threw = false
+        try {
+            await open(kp, wrapped, { info:'context-b' })
+        } catch (_e) {
+            threw = true
+        }
+
+        t.ok(threw, 'mismatched info rejected')
+
+        // Verify matching info succeeds
+        const recovered = await open(kp, wrapped, { info:'context-a' })
+        const recoveredRaw = await raw(recovered)
+        t.ok(
+            recoveredRaw.byteLength > 0,
+            'matching info round-trips successfully'
+        )
+    }
+)
+
+test('AC3.5: malformed envelope causes clear error', async t => {
+    const kp = await genKeypair()
+
+    let threw = false
+    let errorMessage = ''
+    try {
+        await open(kp, new Uint8Array(10))
+    } catch (e) {
+        threw = true
+        if (e instanceof Error) {
+            errorMessage = e.message
+        }
+    }
+
+    t.ok(threw, 'malformed envelope rejected')
+    t.ok(
+        /malformed envelope/.test(errorMessage),
+        'error message contains "malformed envelope"'
+    )
+})
