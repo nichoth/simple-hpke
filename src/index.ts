@@ -1,21 +1,31 @@
-// pattern: Functional Core + Imperative Shell (WebCrypto side effects)
-// A first-party implementation of one fixed RFC 9180 HPKE cipher suite,
-// DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM, base mode,
-// single-shot. Pure helpers build the labeled byte strings; all crypto runs
-// through WebCrypto's subtle API so the X25519 private key may stay
-// non-extractable (HPKE needs only `deriveBits`).
+// RFC 9180 HPKE cipher suite
+// (DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM, base mode, single-shot)
+// - Pure helpers build the labeled byte strings
+// - all crypto runs through WebCrypto's subtle API so the X25519 private
+//   key can stay non-extractable (HPKE needs only `deriveBits`).
 
-/**
- * Options for `seal` / `open`.
- */
-export type HpkeOpts = {
-    // Size of the GENERATED AES key. Ignored when an `aesKey` is supplied.
-    keysize?:128|256
-    // HPKE `info`: bound into the key schedule; must match on seal + open.
-    info?:Uint8Array|string
-}
+import { fromString, toString, type SupportedEncodings } from 'uint8arrays'
 
 const subtle = globalThis.crypto.subtle
+
+// String-key encodings, re-exported from `uint8arrays` (the only runtime
+// dependency). Named `Uint8ArrayEncodings` here for the public API.
+export type Uint8ArrayEncodings = SupportedEncodings
+
+/**
+ * A recipient's X25519 public key, in any of four forms:
+ * - `CryptoKey`: an X25519 public key.
+ * - `CryptoKeyPair`: its `.publicKey` is used (encryption never needs the
+ *   private half).
+ * - `Uint8Array`: 32 raw X25519 public-key bytes.
+ * - `{ publicKey, encoding? }`: the public key as an encoded string;
+ *   `encoding` defaults to `base64url`.
+ */
+export type RecipientKey =
+    | CryptoKey
+    | CryptoKeyPair
+    | Uint8Array
+    | { publicKey:string; encoding?:Uint8ArrayEncodings }
 
 // RFC 9180 suite identifiers for the one suite this package implements:
 // DHKEM(X25519, HKDF-SHA256) = 0x0020, HKDF-SHA256 = 0x0001,
@@ -52,10 +62,240 @@ const HPKE_SUITE_ID = concat(
     i2osp(AEAD_ID, 2)
 )
 
+/**
+ * Wrap an AES key to a recipient's public key.
+ *
+ * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
+ *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
+ *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
+ * @param aesKey Optional key to seal, as either an AES-GCM `CryptoKey` or its
+ *   raw bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh
+ *   extractable key of `opts.keysize` bits. A supplied `CryptoKey` MUST be
+ *   extractable (its raw bytes are sealed).
+ * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
+ *   supplied) and `info` (bound into the HPKE key schedule; default empty).
+ * @returns { wrapped:Uint8Array, key:CryptoKey } The envelope bytes and a
+ *   usable AES-GCM `CryptoKey`.
+ */
+export async function seal (
+    recipient:RecipientKey,
+    aesKey?:CryptoKey|Uint8Array|null,
+    opts?:{
+        // Size of the GENERATED AES key. Ignored when an `aesKey` is supplied.
+        keysize?:128|256
+        // HPKE `info`: bound into the key schedule; must match on seal + open.
+        info?:Uint8Array|string
+    }
+):Promise<{ wrapped:Uint8Array; key:CryptoKey }> {
+    const info = normalizeInfo(opts?.info)
+
+    let keyBytes:Uint8Array
+    if (aesKey instanceof Uint8Array) {
+        validateRawKeyBytes(aesKey)
+        keyBytes = aesKey
+    } else if (aesKey) {
+        keyBytes = await exportAesKeyBytes(aesKey)
+    } else {
+        const keysize = opts?.keysize ?? 256
+        validateKeysize(keysize)
+        keyBytes = globalThis.crypto.getRandomValues(
+            new Uint8Array(keysize / 8)
+        )
+    }
+
+    const publicKey = await resolveRecipientPublicKey(recipient)
+    const { sharedSecret, enc } = await encap(publicKey)
+    const { key, baseNonce } = await keySchedule(sharedSecret, info)
+    const ciphertext = await aeadSeal(key, baseNonce, keyBytes)
+
+    const wrapped = concat(enc, ciphertext)
+    const aesGcmKey = await importAesKey(keyBytes)
+    return { wrapped, key:aesGcmKey }
+}
+
+/**
+ * Recover an AES key that was wrapped with `seal`, using your private key.
+ *
+ * @param keypair The same X25519 `CryptoKeyPair` used to seal.
+ * @param wrapped The envelope returned by `seal` (`enc ‖ ciphertext`).
+ * @param opts `info` — must match the value passed to `seal`.
+ * @returns The recovered AES-GCM `CryptoKey` (extractable).
+ */
+export async function open (
+    keypair:CryptoKeyPair,
+    wrapped:Uint8Array,
+    opts?:{ info:Uint8Array|string }
+):Promise<CryptoKey> {
+    if (wrapped.byteLength < ENC_LENGTH + AEAD_TAG_LENGTH) {
+        throw new Error('malformed envelope: too short')
+    }
+
+    const info = normalizeInfo(opts?.info)
+    const enc = wrapped.slice(0, ENC_LENGTH)
+    const ciphertext = wrapped.slice(ENC_LENGTH)
+
+    const sharedSecret = await decap(enc, keypair)
+    const { key, baseNonce } = await keySchedule(sharedSecret, info)
+    const keyBytes = await aeadOpen(key, baseNonce, ciphertext)
+    return importAesKey(keyBytes)
+}
+
+// Length of the encrypt/decrypt length prefix, in bytes. The prefix is a
+// big-endian u16 giving the byte length of the `wrapped` segment, which
+// varies with the wrapped AES key size (64 bytes for 128-bit, 80 for 256).
+const WRAPPED_LEN_PREFIX = 2
+
+/**
+ * Seal a fresh (or supplied) AES key to `recipient`, then AES-GCM encrypt a
+ * message under it. The wrapped key, IV, and ciphertext are concatenated
+ * into a single self-describing envelope.
+ *
+ * Wire format: `wrappedLen(2, big-endian) ‖ wrapped ‖ iv(12) ‖ ciphertext`.
+ * The length prefix lets `decrypt` slice the segments apart for either
+ * 128- or 256-bit wrapped keys.
+ *
+ * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
+ *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
+ *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
+ * @param message Plaintext to encrypt. A `string` is UTF-8 encoded.
+ * @param aesKey Optional key, as either an AES-GCM `CryptoKey` or its raw
+ *   bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key of
+ *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable.
+ * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
+ *   supplied) and `info` (bound into the HPKE key schedule).
+ * @returns The concatenated envelope bytes.
+ */
+export async function encrypt (
+    recipient:RecipientKey,
+    message:Uint8Array|string,
+    aesKey?:CryptoKey|Uint8Array|null,
+    opts?:{
+        keysize?:128|256
+        info?:Uint8Array|string
+    }
+):Promise<Uint8Array> {
+    const plaintext = typeof message === 'string' ?
+        new TextEncoder().encode(message) :
+        message
+
+    const { wrapped, key } = await seal(recipient, aesKey, opts)
+    const iv = globalThis.crypto.getRandomValues(new Uint8Array(NN))
+    const ct = new Uint8Array(await subtle.encrypt(
+        { name:'AES-GCM', iv:iv as BufferSource },
+        key,
+        plaintext as BufferSource
+    ))
+
+    return concat(i2osp(wrapped.length, WRAPPED_LEN_PREFIX), wrapped, iv, ct)
+}
+
+/**
+ * Convenience wrapper over `encrypt` that encodes the envelope bytes to a
+ * string. Decode with `fromString(...)` (or any matching decoder) and pass the
+ * bytes to `decrypt`/`decryptText`.
+ *
+ * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
+ *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
+ *   or `{ publicKey:string, encoding? }` (encoding defaults to `base64url`).
+ * @param message Plaintext to encrypt. A `string` is UTF-8 encoded.
+ * @param aesKey Optional key, as either an AES-GCM `CryptoKey` or its raw
+ *   bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key of
+ *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable.
+ * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
+ *   supplied), `info` (bound into the HPKE key schedule), and `encoding`
+ *   (the string encoding of the returned envelope; default `base64url`).
+ * @returns The encoded envelope string.
+ */
+export async function encryptText (
+    recipient:RecipientKey,
+    message:Uint8Array|string,
+    aesKey?:CryptoKey|Uint8Array|null,
+    opts?:{
+        keysize?:128|256
+        info?:Uint8Array|string
+        encoding?:SupportedEncodings
+    }
+):Promise<string> {
+    const envelope = await encrypt(recipient, message, aesKey, opts)
+    return toString(envelope, opts?.encoding ?? 'base64url')
+}
+
+/**
+ * Recover the AES key from an envelope produced by `encrypt`, then AES-GCM
+ * decrypt the message.
+ *
+ * @param keypair The same recipient `CryptoKeyPair` used to `encrypt`.
+ * @param message The envelope returned by `encrypt`.
+ * @param opts `info` — must match the value passed to `encrypt`.
+ * @returns The decrypted plaintext bytes. Use `decryptText` for a string.
+ */
+export async function decrypt (
+    keypair:CryptoKeyPair,
+    message:Uint8Array,
+    opts?:{ info?:Uint8Array|string }
+):Promise<Uint8Array> {
+    if (message.byteLength < WRAPPED_LEN_PREFIX) {
+        throw new Error('malformed message: too short')
+    }
+
+    const wrappedLen = (message[0] << 8) | message[1]
+    const ivStart = WRAPPED_LEN_PREFIX + wrappedLen
+    const ctStart = ivStart + NN
+    if (message.byteLength < ctStart + AEAD_TAG_LENGTH) {
+        throw new Error('malformed message: too short')
+    }
+
+    const wrapped = message.slice(WRAPPED_LEN_PREFIX, ivStart)
+    const iv = message.slice(ivStart, ctStart)
+    const ciphertext = message.slice(ctStart)
+
+    const key = await open(
+        keypair,
+        wrapped,
+        opts?.info !== undefined ? { info:opts.info } : undefined
+    )
+    const pt = await subtle.decrypt(
+        { name:'AES-GCM', iv:iv as BufferSource },
+        key,
+        ciphertext as BufferSource
+    )
+    return new Uint8Array(pt)
+}
+
+/**
+ * Convenience wrapper over `decrypt` that UTF-8 decodes the plaintext to a
+ * string. Only use this when the original message was text.
+ *
+ * @param keypair The same recipient `CryptoKeyPair` used to `encrypt`.
+ * @param message The envelope returned by `encrypt`.
+ * @param opts `info` — must match the value passed to `encrypt`.
+ * @returns The decrypted plaintext as a string.
+ */
+export async function decryptText (
+    keypair:CryptoKeyPair,
+    message:Uint8Array,
+    opts?:{ info?:Uint8Array|string }
+):Promise<string> {
+    const bytes = await decrypt(keypair, message, opts)
+    return new TextDecoder().decode(bytes)
+}
+
 function validateKeysize (keysize:number):void {
     if (keysize !== 128 && keysize !== 256) {
         throw new Error(
             `invalid keysize: ${keysize} (expected 128 or 256)`
+        )
+    }
+}
+
+// Raw AES key bytes must be a 128- or 256-bit key: this suite does not
+// support AES-192, so anything but 16 or 32 bytes is rejected (rather than
+// letting WebCrypto silently accept a 24-byte key later).
+function validateRawKeyBytes (raw:Uint8Array):void {
+    if (raw.length !== 16 && raw.length !== 32) {
+        throw new Error(
+            `invalid aesKey length: ${raw.length} bytes ` +
+            '(expected 16 or 32)'
         )
     }
 }
@@ -195,6 +435,63 @@ async function labeledExpand (
 
 async function exportRawPublic (key:CryptoKey):Promise<Uint8Array> {
     return new Uint8Array(await subtle.exportKey('raw', key))
+}
+
+// Import 32 raw bytes as an X25519 public key. Imported extractable: the KEM
+// re-exports the recipient public key for its context, and a public key holds
+// no secret.
+async function importRawPublic (raw:Uint8Array):Promise<CryptoKey> {
+    if (raw.length !== ENC_LENGTH) {
+        throw new Error(
+            `invalid public key length: ${raw.length} bytes ` +
+            `(expected ${ENC_LENGTH})`
+        )
+    }
+    return subtle.importKey(
+        'raw',
+        raw as BufferSource,
+        { name:'X25519' },
+        true,
+        []
+    )
+}
+
+// Resolve any accepted recipient form to an X25519 public `CryptoKey`.
+// Encryption only ever needs the recipient's public key, so a supplied
+// `CryptoKeyPair` contributes only its `.publicKey`.
+async function resolveRecipientPublicKey (
+    recipient:RecipientKey
+):Promise<CryptoKey> {
+    // Raw 32-byte X25519 public key.
+    if (recipient instanceof Uint8Array) {
+        return importRawPublic(recipient)
+    }
+
+    // A single public CryptoKey.
+    if (recipient instanceof CryptoKey) {
+        if (recipient.type !== 'public') {
+            throw new Error('recipient CryptoKey must be a public key')
+        }
+        return recipient
+    }
+
+    // String form: { publicKey, encoding? }, encoding defaults to base64url.
+    if (typeof (recipient as { publicKey?:unknown }).publicKey === 'string') {
+        const { publicKey, encoding } =
+            recipient as { publicKey:string; encoding?:Uint8ArrayEncodings }
+        return importRawPublic(fromString(publicKey, encoding ?? 'base64url'))
+    }
+
+    // CryptoKeyPair: use its public half.
+    const pair = recipient as CryptoKeyPair
+    if (pair.publicKey instanceof CryptoKey) {
+        if (pair.publicKey.type !== 'public') {
+            throw new Error('recipient keypair publicKey must be a public key')
+        }
+        return pair.publicKey
+    }
+
+    throw new Error('unrecognized recipient key form')
 }
 
 // X25519 Diffie-Hellman via WebCrypto deriveBits (works with a
@@ -356,70 +653,4 @@ async function aeadOpen (
         ciphertext as BufferSource
     )
     return new Uint8Array(pt)
-}
-
-/**
- * Wrap an AES key to your own public key.
- *
- * @param keypair An X25519 `CryptoKeyPair` (the private key may be
- *   non-extractable).
- * @param aesKey Optional AES-GCM key to seal. Omit to generate a fresh
- *   extractable key of `opts.keysize` bits. If supplied it MUST be extractable
- *   (its raw bytes are sealed).
- * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
- *   supplied) and `info` (bound into the HPKE key schedule; default empty).
- * @returns The envelope bytes and a usable AES-GCM `CryptoKey`.
- */
-export async function seal (
-    keypair:CryptoKeyPair,
-    aesKey?:CryptoKey|null,
-    opts?:HpkeOpts
-):Promise<{ wrapped:Uint8Array; key:CryptoKey }> {
-    const info = normalizeInfo(opts?.info)
-
-    let keyBytes:Uint8Array
-    if (aesKey) {
-        keyBytes = await exportAesKeyBytes(aesKey)
-    } else {
-        const keysize = opts?.keysize ?? 256
-        validateKeysize(keysize)
-        keyBytes = globalThis.crypto.getRandomValues(
-            new Uint8Array(keysize / 8)
-        )
-    }
-
-    const { sharedSecret, enc } = await encap(keypair.publicKey)
-    const { key, baseNonce } = await keySchedule(sharedSecret, info)
-    const ciphertext = await aeadSeal(key, baseNonce, keyBytes)
-
-    const wrapped = concat(enc, ciphertext)
-    const aesGcmKey = await importAesKey(keyBytes)
-    return { wrapped, key:aesGcmKey }
-}
-
-/**
- * Recover an AES key that was wrapped with `seal`, using your private key.
- *
- * @param keypair The same X25519 `CryptoKeyPair` used to seal.
- * @param wrapped The envelope returned by `seal` (`enc ‖ ciphertext`).
- * @param opts `info` — must match the value passed to `seal`.
- * @returns The recovered AES-GCM `CryptoKey` (extractable).
- */
-export async function open (
-    keypair:CryptoKeyPair,
-    wrapped:Uint8Array,
-    opts?:Pick<HpkeOpts, 'info'>
-):Promise<CryptoKey> {
-    if (wrapped.byteLength < ENC_LENGTH + AEAD_TAG_LENGTH) {
-        throw new Error('malformed envelope: too short')
-    }
-
-    const info = normalizeInfo(opts?.info)
-    const enc = wrapped.slice(0, ENC_LENGTH)
-    const ciphertext = wrapped.slice(ENC_LENGTH)
-
-    const sharedSecret = await decap(enc, keypair)
-    const { key, baseNonce } = await keySchedule(sharedSecret, info)
-    const keyBytes = await aeadOpen(key, baseNonce, ciphertext)
-    return importAesKey(keyBytes)
 }

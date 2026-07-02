@@ -11,19 +11,23 @@ modern browsers and Node.js via WebCrypto.
 
 ```ts
 seal(
-    keypair:CryptoKeyPair,
-    aesKey?:CryptoKey|null,
+    recipient:RecipientKey,
+    aesKey?:CryptoKey|Uint8Array|null,
     opts?:HpkeOpts
 ):Promise<{ wrapped:Uint8Array; key:CryptoKey }>
 ```
 
-Wrap an AES key to your public key.
+Wrap an AES key to a recipient's public key.
 
 **Parameters:**
-- `keypair`: An X25519 `CryptoKeyPair` (private key may be non-extractable).
-- `aesKey`: Optional AES-GCM key to seal. Omit to generate a fresh
-  extractable key of `opts.keysize` bits. If supplied, it MUST be extractable
-  (its raw bytes are sealed).
+- `recipient`: The recipient's X25519 public key. See
+  [`RecipientKey`](#recipientkey) for the accepted forms — a `CryptoKey`, a
+  `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes, or an encoded
+  string. Encryption never needs the private key.
+- `aesKey`: Optional key to seal, as either an AES-GCM `CryptoKey` or its raw
+  bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh extractable
+  key of `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable (its
+  raw bytes are sealed).
 - `opts`: `HpkeOpts` — optional `keysize` and `info`.
 
 **Returns:** An object with `wrapped` (the envelope bytes) and `key` (a
@@ -62,6 +66,30 @@ type HpkeOpts = {
   when an `aesKey` is supplied to `seal`.
 - `info`: Bound into the HPKE key schedule for domain separation. Defaults to
   empty. Must match between `seal` and `open`.
+
+### RecipientKey
+
+```ts
+type RecipientKey =
+    | CryptoKey
+    | CryptoKeyPair
+    | Uint8Array
+    | { publicKey:string; encoding?:Uint8ArrayEncodings }
+```
+
+The recipient argument of `seal` and `encrypt`. All four forms name the same
+thing — the recipient's X25519 public key:
+
+- `CryptoKey`: an X25519 public key.
+- `CryptoKeyPair`: only its `.publicKey` is used (encryption never touches the
+  private key). This is the self-wrap case — seal to your own keypair.
+- `Uint8Array`: 32 raw X25519 public-key bytes.
+- `{ publicKey, encoding? }`: the public key as an encoded string. `encoding`
+  is a `Uint8ArrayEncodings` (re-exported from `uint8arrays`) and defaults to
+  `base64url`.
+
+`open` and `decrypt` are unaffected — they need the private key, so they still
+take a full `CryptoKeyPair`.
 
 ### Wire Format
 
@@ -121,6 +149,40 @@ const { wrapped, key } = await seal(keypair, myKey, { keysize:256 })
 
 // Recover the same key later
 const recovered = await open(keypair, wrapped)
+```
+
+### Seal raw key bytes
+
+```ts
+import { seal, open } from '@substrate-system/ecies'
+
+// A raw 16- or 32-byte AES key — no CryptoKey import needed
+const rawKey = crypto.getRandomValues(new Uint8Array(32))
+
+// seal accepts the bytes directly (see "Generate a new key" for keypair)
+const { wrapped } = await seal(keypair, rawKey)
+
+// open returns a usable AES-GCM CryptoKey with the same bytes
+const recovered = await open(keypair, wrapped)
+```
+
+### Encrypt to someone else's public key
+
+You do not need a keypair to encrypt — only the recipient's public key. It can
+be a `CryptoKey`, 32 raw bytes, or an encoded string.
+
+```ts
+import { encrypt } from '@substrate-system/ecies'
+
+// The recipient shares their X25519 public key as a base64url string
+const recipient = { publicKey:'aGVsbG8...', encoding:'base64url' }
+
+// encoding defaults to base64url, so this is equivalent:
+// const recipient = { publicKey:'aGVsbG8...' }
+
+const envelope = await encrypt(recipient, 'a message for them')
+
+// Only the recipient, holding the matching private key, can decrypt.
 ```
 
 ### With domain separation (info)
@@ -183,4 +245,6 @@ application boundaries (RFC 9180 §7.2.1).
 here. The two share a keypair, but they're **not wire-compatible**: the
 `EccKeys` `wrap`/`unwrap` methods use a different internal protocol than this
 package's standardized HPKE. This package implements the RFC 9180 key schedule
-first-party on WebCrypto, with zero runtime dependencies.
+first-party on WebCrypto — the only runtime dependency is `uint8arrays` (the
+same encoder `@substrate-system/keys` uses), and it touches no crypto: it
+decodes a string-form public key into bytes, nothing more.
