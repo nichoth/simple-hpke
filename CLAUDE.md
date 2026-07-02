@@ -39,7 +39,7 @@ Both test commands run the SAME suite: `test/node.ts` just re-imports
   `opts.keysize` bits (default 256).
 - `open(keypair, wrapped, opts?) → CryptoKey`: recover the sealed key with
   `keypair.privateKey`.
-- `HpkeOpts`: `{ keysize?:128|192|256; info?:Uint8Array|string }`.
+- `HpkeOpts`: `{ keysize?:128|256; info?:Uint8Array|string }`.
 - Wire format: `enc(32 bytes) ‖ ciphertext`. No salt/IV stored (HPKE derives
   the AEAD nonce from its key schedule).
 
