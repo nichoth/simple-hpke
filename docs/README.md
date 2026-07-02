@@ -54,3 +54,22 @@ To retrieve the AES key later:
    equals `ephemeral_private * static_public`).
 3. Run the result through the same **KDF** to re-derive the AES wrapping key.
 4. Decrypt the ciphertext to recover your original AES key.
+
+
+
+-----------------------
+
+
+The standard move is ephemeral-static ECDH (ECIES-shaped): generate a throwaway
+keypair, ECDH its private against your static public, derive the AES-GCM key,
+ship the ephemeral public key alongside the ciphertext, discard the ephemeral
+private. That gives you a fresh key per message and doesn't pin everything to
+one deterministic secret. The two-party check at the bottom (secrets agree: true)
+is that same primitive with the ephemeral side kept around.
+
+One caution on the deterministic path: a fixed AES-GCM key means you must
+never reuse an (key, IV) pair, and since the key never rotates, a random
+96-bit IV per message is doing all the nonce-uniqueness work. Fine at
+low-to-moderate message volume; if you're encrypting a lot under that one
+static key, prefer a counter-based nonce or rotate via HKDF info/salt
+per message.
