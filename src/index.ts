@@ -1,4 +1,4 @@
-// Types and configuration constants (no FCIS pattern — types-plus-constant module)
+// Types + one config constant. FCIS-exempt: no runtime behavior.
 import {
     CipherSuite,
     KEM_DHKEM_X25519_HKDF_SHA256,
