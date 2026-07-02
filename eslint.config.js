@@ -60,6 +60,73 @@ const localPlugin = {
                     TSIntersectionType: check
                 }
             }
+        },
+
+        // Local rule: require exactly one space after the colon and none
+        // before it in object-literal (and object-pattern) properties, so
+        // `{ a: 1 }` is required over `{ a:1 }`. Only visits `Property`
+        // nodes, never `TSPropertySignature`, so type annotations and
+        // type-literal members keep their no-space style (owned by
+        // `@stylistic/type-annotation-spacing`). Enforced inline only,
+        // leaving any multiline `key:\n  value` untouched.
+        'object-colon-spacing': {
+            meta: {
+                type: 'layout',
+                fixable: 'whitespace',
+                schema: [],
+                messages: {
+                    before: "Unexpected space before ':' in object property.",
+                    missing: "Expected a space after ':' in object property.",
+                    extra: "Expected one space after ':' in object property."
+                }
+            },
+            create (context) {
+                const sc = context.sourceCode
+                const isColon = (t) =>
+                    t.type === 'Punctuator' && t.value === ':'
+                return {
+                    Property (node) {
+                        if (node.shorthand || node.method) return
+                        if (node.kind !== 'init') return
+                        const colon = sc.getTokenAfter(node.key, isColon)
+                        if (!colon) return
+                        const prev = sc.getTokenBefore(colon)
+                        const next = sc.getTokenAfter(colon)
+                        if (!prev || !next) return
+                        // No space before the colon (inline only).
+                        if (prev.loc.end.line === colon.loc.start.line &&
+                            prev.range[1] !== colon.range[0]) {
+                            context.report({
+                                node: colon,
+                                messageId: 'before',
+                                fix: (fixer) => fixer.removeRange(
+                                    [prev.range[1], colon.range[0]]
+                                )
+                            })
+                        }
+                        // Exactly one space after the colon (inline only).
+                        if (colon.loc.end.line !== next.loc.start.line) return
+                        const gap = next.range[0] - colon.range[1]
+                        if (gap === 0) {
+                            context.report({
+                                node: colon,
+                                messageId: 'missing',
+                                fix: (fixer) => fixer.insertTextAfter(
+                                    colon, ' '
+                                )
+                            })
+                        } else if (gap > 1) {
+                            context.report({
+                                node: colon,
+                                messageId: 'extra',
+                                fix: (fixer) => fixer.replaceTextRange(
+                                    [colon.range[1], next.range[0]], ' '
+                                )
+                            })
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -123,13 +190,13 @@ export default tseslint.config(
                 after: false,
                 overrides: { arrow: { before: true, after: true } }
             }],
-            // No space around the colon in object and type-literal
-            // members (`{ a:1 }`, `classes?:string[]`).
-            '@stylistic/key-spacing': ['error', {
-                beforeColon: false,
-                afterColon: false,
-                mode: 'strict'
-            }],
+            // Object literals require a space after the colon (`{ a: 1 }`),
+            // owned by `local/object-colon-spacing`. Type-literal members
+            // keep no space (`classes?:string[]`) via
+            // `type-annotation-spacing` above, so `key-spacing` — which
+            // conflates the two — stays off here.
+            '@stylistic/key-spacing': 'off',
+            'local/object-colon-spacing': 'error',
             // Let `local/union-spacing` own union/intersection spacing.
             '@stylistic/space-infix-ops': ['error', { ignoreTypes: true }],
             'local/union-spacing': 'error'

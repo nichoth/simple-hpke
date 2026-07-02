@@ -1,4 +1,4 @@
-# HPKE
+# SImple HPKE
 [![tests](https://img.shields.io/github/actions/workflow/status/nichoth/simple-hpke/nodejs.yml?style=flat-square)](https://github.com/nichoth/simple-hpke/actions/workflows/nodejs.yml)
 [![types](https://img.shields.io/npm/types/@substrate-system/simple-hpke?style=flat-square)](README.md)
 [![module](https://img.shields.io/badge/module-ESM%2FCJS-blue?style=flat-square)](README.md)
@@ -22,6 +22,8 @@ Hybrid Public Key Encryption
   * [Key Wrapping](#key-wrapping)
   * [Hybrid Encryption](#hybrid-encryption)
     + [Encrypt / Decrypt](#encrypt--decrypt)
+      - [`encrypt`](#encrypt)
+      - [Encrypt to a string](#encrypt-to-a-string)
 - [Modules](#modules)
   * [ESM](#esm)
   * [Common JS](#common-js)
@@ -45,7 +47,7 @@ Wrap an AES key, or encrypt a message.
 
 ### Key Wrapping
 
-Encapsulate an AES key to yourself, then recover it later.
+Encrypt an AES key to yourself, then recover it later.
 
 ```ts
 import { seal, open } from '@substrate-system/simple-hpke'
@@ -58,10 +60,10 @@ const keypair = await crypto.subtle.generateKey(
     ['deriveBits']
 )
 
-// create a new AES key, and encapsulate it to your public key.
+// create a new AES key, and encrypt it to your public key.
 const { wrapped, key } = await seal(keypair)
 
-// Or wrap an existing AES key. The supplied key must be extractable
+// Or wrap an existing AES key. The supplied key must be extractable.
 const aesKey = await crypto.subtle.generateKey(
     { name:'AES-GCM', length:256 },
     true,  // extractable
@@ -87,7 +89,7 @@ import { seal, open } from '@substrate-system/simple-hpke'
 
 const recipient = await crypto.subtle.generateKey(
     { name:'X25519' },
-    false,
+    false,  // extractable
     ['deriveBits']
 )
 
@@ -133,14 +135,17 @@ This package exposes functions `encrypt` and `decrypt` which do the same thing.
 `encrypt` seals an AES key to the recipient, encrypts the message under
 it, and returns a single envelope: `wrappedLen + wrapped + iv + ciphertext`
 (a 2-byte length prefix, the wrapped key, the 12-byte AES-GCM IV, and the
-cipher text). `decrypt` reverses it, returning the plaintext bytes;
-`decryptText` is a convenient way to decrypt to a string.
+cipher text). `decrypt` reverses it, returning the plaintext bytes.
+
+> [!NOTE]  
+> See `decrypt.asString` below for a convenient way to decrypt to a string.
+> See `encrypt.asString` for encrypting and econding to a string.
+
 
 ```ts
 import {
     encrypt,
-    decrypt,
-    decryptText
+    decrypt
 } from '@substrate-system/simple-hpke'
 
 // need a public key for the recipient
@@ -154,7 +159,7 @@ const recipient = await crypto.subtle.generateKey(
 const encryptedMessage = await encrypt(recipient, 'hello encryption')
 
 // the recipient recovers the message with their private key
-const text = await decryptText(recipient, encryptedMessage)
+const text = await decrypt.asString(recipient, encryptedMessage)
 
 // use `decrypt` to get a Uint8Array
 const bytes = await decrypt(recipient, encryptedMessage)
@@ -200,29 +205,30 @@ async function encrypt (
 
 ##### Encrypt to a string
 
-`encryptText` is `encrypt` with the envelope encoded to a string, handy for
-transports that carry text (JSON, URLs, headers). `opts.encoding` sets the
+`encrypt.asString` is `encrypt` with the envelope encoded to a string, handy
+for transports that carry text (JSON, URLs, headers). `opts.encoding` sets the
 string encoding. Default encoding is `base64url`.
 
 ```ts
-import { encryptText, decryptText } from '@substrate-system/ecies'
+import { encrypt, decrypt } from '@substrate-system/ecies'
 import { fromString } from 'uint8arrays'
 
 // recipient is any RecipientKey; keypair holds the matching private key
-const encryptedString = await encryptText(recipient, 'message for them', null, {
+const encryptedString = await encrypt.asString(recipient, 'message for them', null, {
     encoding:'base64url'
 })
 
 // Decode it back to bytes before decrypting.
 const message = fromString(encryptedString, 'base64url')
-const plaintext = await decryptText(keypair, message)
+const plaintext = await decrypt.asString(keypair, message)
 // 'message for them'
 ```
 
 The returned string encodes the same envelope `encrypt` returns, so the
 recipient decodes it with a matching decoder (here `fromString`) and passes the
-bytes to `decrypt` / `decryptText`.
+bytes to `decrypt` / `decrypt.asString`.
 
+##### `decrypt`
 
 ## Modules
 

@@ -1,6 +1,6 @@
 import { test } from '@substrate-system/tapzero'
 import { toString } from 'uint8arrays'
-import { seal, open, encrypt, decrypt, decryptText } from '../src/index.js'
+import { seal, open, encrypt, decrypt } from '../src/index.js'
 import { EccKeys } from '@substrate-system/keys/ecc'
 
 const subtle = globalThis.crypto.subtle
@@ -28,12 +28,12 @@ test('seal and open keys are cross-usable', async t => {
     const plaintext1 = new TextEncoder().encode('hello')
     const iv1 = globalThis.crypto.getRandomValues(new Uint8Array(12))
     const ciphertext1 = await subtle.encrypt(
-        { name:'AES-GCM', iv:iv1 },
+        { name: 'AES-GCM', iv: iv1 },
         key,
         plaintext1
     )
     const decrypted1 = await subtle.decrypt(
-        { name:'AES-GCM', iv:iv1 },
+        { name: 'AES-GCM', iv: iv1 },
         recovered,
         ciphertext1
     )
@@ -47,12 +47,12 @@ test('seal and open keys are cross-usable', async t => {
     const plaintext2 = new TextEncoder().encode('world')
     const iv2 = globalThis.crypto.getRandomValues(new Uint8Array(12))
     const ciphertext2 = await subtle.encrypt(
-        { name:'AES-GCM', iv:iv2 },
+        { name: 'AES-GCM', iv: iv2 },
         recovered,
         plaintext2
     )
     const decrypted2 = await subtle.decrypt(
-        { name:'AES-GCM', iv:iv2 },
+        { name: 'AES-GCM', iv: iv2 },
         key,
         ciphertext2
     )
@@ -66,7 +66,7 @@ test('seal and open keys are cross-usable', async t => {
 test('seal/open with caller-supplied key', async t => {
     const kp = await genKeypair()
     const myKey = await subtle.generateKey(
-        { name:'AES-GCM', length:256 },
+        { name: 'AES-GCM', length: 256 },
         true,
         ['encrypt', 'decrypt']
     )
@@ -133,13 +133,13 @@ test('keysize 128 and 256 produce correct byte lengths', async t => {
     const kp = await genKeypair()
 
     // keysize: 128
-    const sealed128 = await seal(kp, null, { keysize:128 })
+    const sealed128 = await seal(kp, null, { keysize: 128 })
     const recovered128 = await open(kp, sealed128.wrapped)
     const raw128 = await raw(recovered128)
     t.equal(raw128.byteLength, 16, 'keysize 128 → 16 bytes')
 
     // keysize: 256
-    const sealed256 = await seal(kp, null, { keysize:256 })
+    const sealed256 = await seal(kp, null, { keysize: 256 })
     const recovered256 = await open(kp, sealed256.wrapped)
     const raw256 = await raw(recovered256)
     t.equal(raw256.byteLength, 32, 'keysize 256 → 32 bytes')
@@ -148,7 +148,7 @@ test('keysize 128 and 256 produce correct byte lengths', async t => {
 test('non-extractable key throws', async t => {
     const kp = await genKeypair()
     const nonExtractable = await subtle.generateKey(
-        { name:'AES-GCM', length:256 },
+        { name: 'AES-GCM', length: 256 },
         false,
         ['encrypt', 'decrypt']
     )
@@ -176,7 +176,7 @@ test('invalid keysize throws', async t => {
 
     let threw = false
     try {
-        await seal(kp, null, { keysize:100 as any })
+        await seal(kp, null, { keysize: 100 as any })
     } catch (_e) {
         threw = true
     }
@@ -188,7 +188,7 @@ test('sealing the same key twice yields different envelopes',
     async t => {
         const kp = await genKeypair()
         const myKey = await subtle.generateKey(
-            { name:'AES-GCM', length:256 },
+            { name: 'AES-GCM', length: 256 },
             true,
             ['encrypt', 'decrypt']
         )
@@ -206,8 +206,8 @@ test('sealing the same key twice yields different envelopes',
 async function eccKeypair ():Promise<CryptoKeyPair> {
     const keys = await EccKeys.create()
     return {
-        publicKey:keys.publicExchangeKey,
-        privateKey:keys.privateExchangeKey
+        publicKey: keys.publicExchangeKey,
+        privateKey: keys.privateExchangeKey
     }
 }
 
@@ -229,12 +229,12 @@ test('EccKeys getters assemble working keypair',
     async t => {
         const keys = await EccKeys.create()
         const kp = {
-            publicKey:keys.publicExchangeKey,
-            privateKey:keys.privateExchangeKey
+            publicKey: keys.publicExchangeKey,
+            privateKey: keys.privateExchangeKey
         }
 
         const myKey = await subtle.generateKey(
-            { name:'AES-GCM', length:256 },
+            { name: 'AES-GCM', length: 256 },
             true,
             ['encrypt', 'decrypt']
         )
@@ -292,12 +292,12 @@ test('mismatched info causes rejection, matching succeeds',
         const kp = await genKeypair()
 
         // Seal with 'context-a'
-        const { wrapped, key } = await seal(kp, null, { info:'context-a' })
+        const { wrapped, key } = await seal(kp, null, { info: 'context-a' })
 
         // Attempt open with mismatched 'context-b'
         let threw = false
         try {
-            await open(kp, wrapped, { info:'context-b' })
+            await open(kp, wrapped, { info: 'context-b' })
         } catch (_e) {
             threw = true
         }
@@ -305,7 +305,7 @@ test('mismatched info causes rejection, matching succeeds',
         t.ok(threw, 'mismatched info rejected')
 
         // Verify matching info succeeds
-        const recovered = await open(kp, wrapped, { info:'context-a' })
+        const recovered = await open(kp, wrapped, { info: 'context-a' })
         t.ok(bytesEqual(await raw(key), await raw(recovered)),
             'matching info round-trips to identical bytes'
         )
@@ -338,7 +338,7 @@ test('malformed envelope causes clear error', async t => {
 test('encrypt/decrypt round-trip with a string', async t => {
     const kp = await genKeypair()
     const envelope = await encrypt(kp, 'hello encryption')
-    const plaintext = await decryptText(kp, envelope)
+    const plaintext = await decrypt.asString(kp, envelope)
     t.equal(plaintext, 'hello encryption', 'string round-trips')
 })
 
@@ -353,12 +353,12 @@ test('encrypt/decrypt round-trip with bytes', async t => {
 test('encrypt with a caller-supplied AES key', async t => {
     const kp = await genKeypair()
     const existingKey = await subtle.generateKey(
-        { name:'AES-GCM', length:256 },
+        { name: 'AES-GCM', length: 256 },
         true,
         ['encrypt', 'decrypt']
     )
     const envelope = await encrypt(kp, 'hello again', existingKey)
-    const plaintext = await decryptText(kp, envelope)
+    const plaintext = await decrypt.asString(kp, envelope)
     t.equal(plaintext, 'hello again', 'supplied-key round-trips')
 })
 
@@ -367,28 +367,28 @@ test('encrypt with a raw Uint8Array AES key', async t => {
     const rawKey = globalThis.crypto.getRandomValues(new Uint8Array(32))
 
     const envelope = await encrypt(kp, 'raw key message', rawKey)
-    const plaintext = await decryptText(kp, envelope)
+    const plaintext = await decrypt.asString(kp, envelope)
     t.equal(plaintext, 'raw key message', 'raw-key encrypt round-trips')
 })
 
 test('encrypt/decrypt round-trip with 128-bit key', async t => {
     const kp = await genKeypair()
-    const envelope = await encrypt(kp, 'small key', null, { keysize:128 })
-    const plaintext = await decryptText(kp, envelope)
+    const envelope = await encrypt(kp, 'small key', null, { keysize: 128 })
+    const plaintext = await decrypt.asString(kp, envelope)
     t.equal(plaintext, 'small key', '128-bit wrapped key round-trips')
 })
 
 test('encrypt/decrypt honors matching info, rejects mismatch',
     async t => {
         const kp = await genKeypair()
-        const envelope = await encrypt(kp, 'bound', null, { info:'ctx-a' })
+        const envelope = await encrypt(kp, 'bound', null, { info: 'ctx-a' })
 
-        const plaintext = await decryptText(kp, envelope, { info:'ctx-a' })
+        const plaintext = await decrypt.asString(kp, envelope, { info: 'ctx-a' })
         t.equal(plaintext, 'bound', 'matching info decrypts')
 
         let threw = false
         try {
-            await decrypt(kp, envelope, { info:'ctx-b' })
+            await decrypt(kp, envelope, { info: 'ctx-b' })
         } catch (_e) {
             threw = true
         }
@@ -458,7 +458,7 @@ test('encrypting the same message twice yields different envelopes',
 test('encrypt to a bare public CryptoKey', async t => {
     const kp = await genKeypair()
     const envelope = await encrypt(kp.publicKey, 'to a public key')
-    const plaintext = await decryptText(kp, envelope)
+    const plaintext = await decrypt.asString(kp, envelope)
     t.equal(plaintext, 'to a public key', 'public-key recipient round-trips')
 })
 
@@ -478,7 +478,7 @@ test('encrypt to raw public-key bytes', async t => {
     t.equal(pubBytes.byteLength, 32, 'X25519 public key is 32 bytes')
 
     const envelope = await encrypt(pubBytes, 'to raw bytes')
-    const plaintext = await decryptText(kp, envelope)
+    const plaintext = await decrypt.asString(kp, envelope)
     t.equal(plaintext, 'to raw bytes', 'raw-bytes recipient round-trips')
 })
 
@@ -487,8 +487,8 @@ test('encrypt to a base64url string public key (default encoding)',
         const kp = await genKeypair()
         const pubStr = toString(await raw(kp.publicKey), 'base64url')
 
-        const envelope = await encrypt({ publicKey:pubStr }, 'to a string')
-        const plaintext = await decryptText(kp, envelope)
+        const envelope = await encrypt({ publicKey: pubStr }, 'to a string')
+        const plaintext = await decrypt.asString(kp, envelope)
         t.equal(plaintext, 'to a string', 'default-encoding string round-trips')
     }
 )
@@ -498,10 +498,10 @@ test('encrypt to a hex string public key (explicit encoding)', async t => {
     const pubStr = toString(await raw(kp.publicKey), 'hex')
 
     const envelope = await encrypt(
-        { publicKey:pubStr, encoding:'hex' },
+        { publicKey: pubStr, encoding: 'hex' },
         'hex recipient'
     )
-    const plaintext = await decryptText(kp, envelope)
+    const plaintext = await decrypt.asString(kp, envelope)
     t.equal(plaintext, 'hex recipient', 'hex-encoded string round-trips')
 })
 
@@ -545,7 +545,7 @@ test('a mismatched-encoding string recipient throws', async t => {
 
     let threw = false
     try {
-        await encrypt({ publicKey:pubStr, encoding:'hex' }, 'nope')
+        await encrypt({ publicKey: pubStr, encoding: 'hex' }, 'nope')
     } catch (_e) {
         threw = true
     }
@@ -561,7 +561,7 @@ test('all done', () => {
 
 async function genKeypair ():Promise<CryptoKeyPair> {
     return subtle.generateKey(
-        { name:'X25519' },
+        { name: 'X25519' },
         false,                 // non-extractable private key
         ['deriveBits']
     ) as Promise<CryptoKeyPair>

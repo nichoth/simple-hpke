@@ -110,7 +110,7 @@ export async function seal (
 
     const wrapped = concat(enc, ciphertext)
     const aesGcmKey = await importAesKey(keyBytes)
-    return { wrapped, key:aesGcmKey }
+    return { wrapped, key: aesGcmKey }
 }
 
 /**
@@ -164,8 +164,10 @@ const WRAPPED_LEN_PREFIX = 2
  * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
  *   supplied) and `info` (bound into the HPKE key schedule).
  * @returns The concatenated envelope bytes.
+ *
+ * `encrypt.asString(...)` returns the same envelope as an encoded string.
  */
-export async function encrypt (
+async function encryptBytes (
     recipient:RecipientKey,
     message:Uint8Array|string,
     aesKey?:CryptoKey|Uint8Array|null,
@@ -181,7 +183,7 @@ export async function encrypt (
     const { wrapped, key } = await seal(recipient, aesKey, opts)
     const iv = globalThis.crypto.getRandomValues(new Uint8Array(NN))
     const ct = new Uint8Array(await subtle.encrypt(
-        { name:'AES-GCM', iv:iv as BufferSource },
+        { name: 'AES-GCM', iv: iv as BufferSource },
         key,
         plaintext as BufferSource
     ))
@@ -190,9 +192,10 @@ export async function encrypt (
 }
 
 /**
- * Convenience wrapper over `encrypt` that encodes the envelope bytes to a
- * string. Decode with `fromString(...)` (or any matching decoder) and pass the
- * bytes to `decrypt`/`decryptText`.
+ * Like `encrypt`, but encodes the envelope bytes to a string — handy for
+ * transports that carry text (JSON, URLs, headers). Decode with
+ * `fromString(...)` (or any matching decoder) and pass the bytes to
+ * `decrypt` / `decrypt.asString`. Exposed as `encrypt.asString`.
  *
  * @param recipient The recipient's X25519 public key, as a `CryptoKey`,
  *   `CryptoKeyPair` (its `.publicKey` is used), 32 raw bytes (`Uint8Array`),
@@ -206,7 +209,7 @@ export async function encrypt (
  *   (the string encoding of the returned envelope; default `base64url`).
  * @returns The encoded envelope string.
  */
-export async function encryptText (
+async function encryptToString (
     recipient:RecipientKey,
     message:Uint8Array|string,
     aesKey?:CryptoKey|Uint8Array|null,
@@ -216,9 +219,27 @@ export async function encryptText (
         encoding?:SupportedEncodings
     }
 ):Promise<string> {
-    const envelope = await encrypt(recipient, message, aesKey, opts)
+    const envelope = await encryptBytes(recipient, message, aesKey, opts)
     return toString(envelope, opts?.encoding ?? 'base64url')
 }
+
+/**
+ * Seal an AES key to `recipient` and AES-GCM encrypt a message under it.
+ * Call `encrypt(...)` for the raw envelope bytes, or `encrypt.asString(...)`
+ * for the same envelope as an encoded string.
+ */
+export const encrypt = Object.assign(encryptBytes, {
+    asString: encryptToString
+})
+
+/**
+ * Recover the AES key from an `encrypt` envelope and AES-GCM decrypt the
+ * message. Call `decrypt(...)` for the plaintext bytes, or
+ * `decrypt.asString(...)` to UTF-8 decode them to a string.
+ */
+export const decrypt = Object.assign(decryptBytes, {
+    asString: decryptToString
+})
 
 /**
  * Recover the AES key from an envelope produced by `encrypt`, then AES-GCM
@@ -227,9 +248,9 @@ export async function encryptText (
  * @param keypair The same recipient `CryptoKeyPair` used to `encrypt`.
  * @param message The envelope returned by `encrypt`.
  * @param opts `info` — must match the value passed to `encrypt`.
- * @returns The decrypted plaintext bytes. Use `decryptText` for a string.
+ * @returns The decrypted plaintext bytes. Use `decrypt.asString` for a string.
  */
-export async function decrypt (
+async function decryptBytes (
     keypair:CryptoKeyPair,
     message:Uint8Array,
     opts?:{ info?:Uint8Array|string }
@@ -252,10 +273,10 @@ export async function decrypt (
     const key = await open(
         keypair,
         wrapped,
-        opts?.info !== undefined ? { info:opts.info } : undefined
+        opts?.info !== undefined ? { info: opts.info } : undefined
     )
     const pt = await subtle.decrypt(
-        { name:'AES-GCM', iv:iv as BufferSource },
+        { name: 'AES-GCM', iv: iv as BufferSource },
         key,
         ciphertext as BufferSource
     )
@@ -263,20 +284,20 @@ export async function decrypt (
 }
 
 /**
- * Convenience wrapper over `decrypt` that UTF-8 decodes the plaintext to a
- * string. Only use this when the original message was text.
+ * Like `decrypt`, but UTF-8 decodes the plaintext to a string. Only use this
+ * when the original message was text. Exposed as `decrypt.asString`.
  *
  * @param keypair The same recipient `CryptoKeyPair` used to `encrypt`.
  * @param message The envelope returned by `encrypt`.
  * @param opts `info` — must match the value passed to `encrypt`.
  * @returns The decrypted plaintext as a string.
  */
-export async function decryptText (
+async function decryptToString (
     keypair:CryptoKeyPair,
     message:Uint8Array,
     opts?:{ info?:Uint8Array|string }
 ):Promise<string> {
-    const bytes = await decrypt(keypair, message, opts)
+    const bytes = await decryptBytes(keypair, message, opts)
     return new TextDecoder().decode(bytes)
 }
 
@@ -319,7 +340,7 @@ async function importAesKey (raw:Uint8Array):Promise<CryptoKey> {
     return subtle.importKey(
         'raw',
         raw as BufferSource,
-        { name:'AES-GCM' },
+        { name: 'AES-GCM' },
         true,
         ['encrypt', 'decrypt']
     )
@@ -360,7 +381,7 @@ async function hmac (key:Uint8Array, data:Uint8Array):Promise<Uint8Array> {
     const k = await subtle.importKey(
         'raw',
         key as BufferSource,
-        { name:'HMAC', hash:'SHA-256' },
+        { name: 'HMAC', hash: 'SHA-256' },
         false,
         ['sign']
     )
@@ -450,7 +471,7 @@ async function importRawPublic (raw:Uint8Array):Promise<CryptoKey> {
     return subtle.importKey(
         'raw',
         raw as BufferSource,
-        { name:'X25519' },
+        { name: 'X25519' },
         true,
         []
     )
@@ -501,7 +522,7 @@ async function dh (
     pub:CryptoKey
 ):Promise<Uint8Array> {
     const bits = await subtle.deriveBits(
-        { name:'X25519', public:pub },
+        { name: 'X25519', public: pub },
         priv,
         256
     )
@@ -535,7 +556,7 @@ async function encap (
     pkR:CryptoKey
 ):Promise<{ sharedSecret:Uint8Array; enc:Uint8Array }> {
     const eph = await subtle.generateKey(
-        { name:'X25519' },
+        { name: 'X25519' },
         true,
         ['deriveBits']
     ) as CryptoKeyPair
@@ -557,7 +578,7 @@ async function decap (
     const pkE = await subtle.importKey(
         'raw',
         enc as BufferSource,
-        { name:'X25519' },
+        { name: 'X25519' },
         false,
         []
     )
@@ -623,12 +644,12 @@ async function aeadSeal (
     const k = await subtle.importKey(
         'raw',
         key as BufferSource,
-        { name:'AES-GCM' },
+        { name: 'AES-GCM' },
         false,
         ['encrypt']
     )
     const ct = await subtle.encrypt(
-        { name:'AES-GCM', iv:nonce as BufferSource },
+        { name: 'AES-GCM', iv: nonce as BufferSource },
         k,
         plaintext as BufferSource
     )
@@ -643,12 +664,12 @@ async function aeadOpen (
     const k = await subtle.importKey(
         'raw',
         key as BufferSource,
-        { name:'AES-GCM' },
+        { name: 'AES-GCM' },
         false,
         ['decrypt']
     )
     const pt = await subtle.decrypt(
-        { name:'AES-GCM', iv:nonce as BufferSource },
+        { name: 'AES-GCM', iv: nonce as BufferSource },
         k,
         ciphertext as BufferSource
     )
