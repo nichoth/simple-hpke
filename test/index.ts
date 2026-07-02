@@ -172,3 +172,56 @@ test('AC3.4: sealing the same key twice yields different envelopes',
         t.ok(!same, 'two seals of same key produce different envelopes')
     }
 )
+
+// ===== TASK 1: @substrate-system/keys EccKeys integration tests =====
+
+import { EccKeys } from '@substrate-system/keys/ecc'
+
+async function eccKeypair ():Promise<CryptoKeyPair> {
+    const keys = await EccKeys.create()
+    return {
+        publicKey:keys.publicExchangeKey,
+        privateKey:keys.privateExchangeKey
+    }
+}
+
+test('AC2.1: EccKeys keypair round-trip seal/open', async t => {
+    const kp = await eccKeypair()
+    const { wrapped, key } = await seal(kp)
+    const recovered = await open(kp, wrapped)
+
+    const keyRaw = await raw(key)
+    const recoveredRaw = await raw(recovered)
+
+    t.ok(
+        bytesEqual(keyRaw, recoveredRaw),
+        'EccKeys keypair round-trips with correct bytes'
+    )
+})
+
+test('AC2.2: EccKeys getters assemble working keypair',
+    async t => {
+        const keys = await EccKeys.create()
+        const kp = {
+            publicKey:keys.publicExchangeKey,
+            privateKey:keys.privateExchangeKey
+        }
+
+        const myKey = await subtle.generateKey(
+            { name:'AES-GCM', length:256 },
+            true,
+            ['encrypt', 'decrypt']
+        )
+
+        const { wrapped } = await seal(kp, myKey)
+        const recovered = await open(kp, wrapped)
+
+        const myRaw = await raw(myKey)
+        const recoveredRaw = await raw(recovered)
+
+        t.ok(
+            bytesEqual(myRaw, recoveredRaw),
+            'EccKeys getters form valid keypair for seal/open'
+        )
+    }
+)
