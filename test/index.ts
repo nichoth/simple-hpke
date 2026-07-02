@@ -138,8 +138,8 @@ test('AC1.5: non-extractable key throws', async t => {
 
     t.ok(threw, 'non-extractable key throws during seal')
     t.ok(
-        /extractable/.test(errorMessage),
-        'error message mentions extractable guard'
+        /raw bytes are what get sealed/.test(errorMessage),
+        'error message contains guard message (not WebCrypto error)'
     )
 })
 
