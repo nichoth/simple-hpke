@@ -45,7 +45,7 @@ Wrap an AES key, or encrypt a message.
 
 ### Key Wrapping
 
-Encapsulate an AES key to yourself, then recover it later.
+Encrypt an AES key to yourself, then recover it later.
 
 ```ts
 import { seal, open } from '@substrate-system/simple-hpke'
