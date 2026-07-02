@@ -1,3 +1,4 @@
+// Types and configuration constants (no FCIS pattern — types-plus-constant module)
 import {
     CipherSuite,
     KEM_DHKEM_X25519_HKDF_SHA256,
@@ -8,7 +9,7 @@ import {
 /**
  * Options for `seal` / `open`.
  */
-export interface HpkeOpts {
+export type HpkeOpts = {
     // Size of the GENERATED AES key. Ignored when an `aesKey` is supplied.
     keysize?:128|192|256
     // HPKE `info`: bound into the key schedule; must match on seal + open.

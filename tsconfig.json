@@ -8,7 +8,6 @@
     "types": ["vite/client"],
     "allowJs": false,
     "skipLibCheck": true,
-    "rootDir": "./src",
     "outDir": "dist",
     "allowSyntheticDefaultImports": true,
     "experimentalDecorators": true,
