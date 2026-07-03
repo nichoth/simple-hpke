@@ -12,6 +12,8 @@
 Hybrid Public Key Encryption
 ([RFC 9180](https://www.rfc-editor.org/rfc/rfc9180.html))
 
+1 dependency -- `uint8arrays`.
+
 
 <details><summary><h2>Contents</h2></summary>
 
