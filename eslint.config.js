@@ -183,12 +183,13 @@ export default tseslint.config(
                 prefer: 'type-imports'
             }],
             // No space around the colon in type annotations
-            // (`const x:T`, params, returns). Keep `=>` in function
-            // types spaced via the arrow override.
+            // (`const x:T`, params, returns). `=>` in function types
+            // stays spaced via `@stylistic/arrow-spacing` (on by
+            // default from neostandard), not the deprecated
+            // `overrides.arrow` here.
             '@stylistic/type-annotation-spacing': ['error', {
                 before: false,
-                after: false,
-                overrides: { arrow: { before: true, after: true } }
+                after: false
             }],
             // Object literals require a space after the colon (`{ a: 1 }`),
             // owned by `local/object-colon-spacing`. Type-literal members
