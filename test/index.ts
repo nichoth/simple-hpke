@@ -222,6 +222,46 @@ test('open.raw with wrong keypair throws', async t => {
     t.ok(threw, 'wrong keypair rejected by open.raw')
 })
 
+test('open.raw with tampered ciphertext throws', async t => {
+    const kp = await genKeypair()
+    const { wrapped } = await seal(kp)
+
+    const copy = new Uint8Array(wrapped)
+    copy[copy.length - 1] ^= 1
+
+    let threw = false
+    try {
+        await open.raw(kp, copy)
+    } catch (_e) {
+        threw = true
+    }
+
+    t.ok(threw, 'tampered ciphertext rejected by open.raw')
+})
+
+test('open.raw with mismatched info throws',
+    async t => {
+        const kp = await genKeypair()
+
+        // Seal with 'abc'
+        const { wrapped } = await seal(kp, null, { info: 'abc' })
+
+        // Attempt open.raw with mismatched 'xyz'
+        let threw = false
+        try {
+            await open.raw(kp, wrapped, { info: 'xyz' })
+        } catch (_e) {
+            threw = true
+        }
+
+        t.ok(threw, 'mismatched info rejected by open.raw')
+
+        // Verify matching info succeeds
+        const recovered = await open.raw(kp, wrapped, { info: 'abc' })
+        t.ok(recovered.byteLength > 0, 'matching info round-trips')
+    }
+)
+
 test('non-extractable key throws', async t => {
     const kp = await genKeypair()
     const nonExtractable = await subtle.generateKey(
