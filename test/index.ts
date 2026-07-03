@@ -145,6 +145,83 @@ test('keysize 128 and 256 produce correct byte lengths', async t => {
     t.equal(raw256.byteLength, 32, 'keysize 256 → 32 bytes')
 })
 
+test('open.raw returns raw bytes for 32-byte key', async t => {
+    const kp = await genKeypair()
+    const originalKey = globalThis.crypto.getRandomValues(new Uint8Array(32))
+
+    const { wrapped } = await seal(kp, originalKey)
+    const recoveredBytes = await open.raw(kp, wrapped)
+
+    t.ok(
+        bytesEqual(originalKey, recoveredBytes),
+        '32-byte key round-trips via open.raw'
+    )
+})
+
+test('open.raw returns raw bytes for 16-byte key', async t => {
+    const kp = await genKeypair()
+    const originalKey = globalThis.crypto.getRandomValues(new Uint8Array(16))
+
+    const { wrapped } = await seal(kp, originalKey)
+    const recoveredBytes = await open.raw(kp, wrapped)
+
+    t.ok(
+        bytesEqual(originalKey, recoveredBytes),
+        '16-byte key round-trips via open.raw'
+    )
+})
+
+test('open.raw and open return equivalent key bytes', async t => {
+    const kp = await genKeypair()
+    const { wrapped } = await seal(kp)
+
+    const recoveredViaCryptoKey = await open(kp, wrapped)
+    const recoveredViaRawBytes = await open.raw(kp, wrapped)
+    const cryptoKeyAsRaw = await raw(recoveredViaCryptoKey)
+
+    t.ok(
+        bytesEqual(cryptoKeyAsRaw, recoveredViaRawBytes),
+        'open.raw and open export to identical bytes'
+    )
+})
+
+test('open.raw with malformed envelope throws', async t => {
+    const kp = await genKeypair()
+
+    let threw = false
+    let errorMessage = ''
+    try {
+        await open.raw(kp, new Uint8Array(10))
+    } catch (e) {
+        threw = true
+        if (e instanceof Error) {
+            errorMessage = e.message
+        }
+    }
+
+    t.ok(threw, 'malformed envelope rejected by open.raw')
+    t.ok(
+        /malformed envelope/.test(errorMessage),
+        'error message contains "malformed envelope"'
+    )
+})
+
+test('open.raw with wrong keypair throws', async t => {
+    const kpA = await genKeypair()
+    const kpB = await genKeypair()
+
+    const { wrapped } = await seal(kpA)
+
+    let threw = false
+    try {
+        await open.raw(kpB, wrapped)
+    } catch (_e) {
+        threw = true
+    }
+
+    t.ok(threw, 'wrong keypair rejected by open.raw')
+})
+
 test('non-extractable key throws', async t => {
     const kp = await genKeypair()
     const nonExtractable = await subtle.generateKey(

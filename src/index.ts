@@ -121,11 +121,30 @@ export async function seal (
  * @param opts `info` — must match the value passed to `seal`.
  * @returns The recovered AES-GCM `CryptoKey` (extractable).
  */
-export async function open (
+async function openBytes (
     keypair:CryptoKeyPair,
     wrapped:Uint8Array,
     opts?:{ info:Uint8Array|string }
 ):Promise<CryptoKey> {
+    const keyBytes = await openRawBytes(keypair, wrapped, opts)
+    return importAesKey(keyBytes)
+}
+
+/**
+ * Like `open`, but returns the recovered key as raw bytes instead of
+ * importing it as an AES-GCM `CryptoKey`. Exposed as `open.raw`.
+ *
+ * @param keypair The same X25519 `CryptoKeyPair` used to seal.
+ * @param wrapped The envelope returned by `seal` (`enc ‖ ciphertext`).
+ * @param opts `info` — must match the value passed to `seal`.
+ * @returns The recovered key bytes (16 or 32 bytes, matching whatever
+ *   was sealed).
+ */
+async function openRawBytes (
+    keypair:CryptoKeyPair,
+    wrapped:Uint8Array,
+    opts?:{ info:Uint8Array|string }
+):Promise<Uint8Array> {
     if (wrapped.byteLength < ENC_LENGTH + AEAD_TAG_LENGTH) {
         throw new Error('malformed envelope: too short')
     }
@@ -136,9 +155,16 @@ export async function open (
 
     const sharedSecret = await decap(enc, keypair)
     const { key, baseNonce } = await keySchedule(sharedSecret, info)
-    const keyBytes = await aeadOpen(key, baseNonce, ciphertext)
-    return importAesKey(keyBytes)
+    return aeadOpen(key, baseNonce, ciphertext)
 }
+
+/**
+ * Recover the AES key wrapped by `seal`. Call `open(...)` for a usable
+ * AES-GCM `CryptoKey`, or `open.raw(...)` for the raw key bytes.
+ */
+export const open = Object.assign(openBytes, {
+    raw: openRawBytes
+})
 
 // Length of the encrypt/decrypt length prefix, in bytes. The prefix is a
 // big-endian u16 giving the byte length of the `wrapped` segment, which
