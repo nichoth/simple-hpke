@@ -47,11 +47,10 @@
     "@substrate-system/tapout": "^0.0.38",
     "@substrate-system/tapzero": "^0.10.15",
     "auto-changelog": "^2.4.0",
-    "esbuild": "^0.27.0",
+    "esbuild": "^0.28.1",
     "eslint": "^10.6.0",
     "markdown-toc": "^1.2.0",
     "newneostandard": "^0.14.1",
-    "tap-spec": "^5.0.0",
     "typedoc": "^0.28.9",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.62.0"

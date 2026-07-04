@@ -14,7 +14,6 @@ Hybrid Public Key Encryption
 
 1 dependency -- `uint8arrays`.
 
-
 <details><summary><h2>Contents</h2></summary>
 
 <!-- toc -->

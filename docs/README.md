@@ -232,6 +232,16 @@ The AEAD nonce is derived from the key schedule, not stored or transmitted.
 Each seal uses a fresh ephemeral, so there's no AES-GCM nonce-reuse window
 (RFC 9180 §7.2.2).
 
+This applies to the key-wrapping AEAD inside `seal`/`open`, not the
+message AEAD in `encrypt`/`decrypt`. `encrypt` generates a fresh random
+96-bit IV per call for the message ciphertext, which is safe for a fresh
+or infrequently reused `aesKey`. If you pass the *same* `aesKey` into many
+`encrypt` calls, those random IVs carry the standard birthday bound for
+96-bit random nonces: collision risk becomes non-negligible around 2^32
+messages under one key (NIST SP 800-38D). Prefer a fresh `aesKey` per
+`encrypt` call (the default), or track a counter/sequence-based IV
+yourself if you must reuse one key at scale.
+
 ### info binding
 
 Passing `info` to both `seal` and `open` binds context (e.g., an application

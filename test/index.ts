@@ -1,5 +1,5 @@
 import { test } from '@substrate-system/tapzero'
-import { toString } from 'uint8arrays'
+import { toString, fromString } from 'uint8arrays'
 import { seal, open, encrypt, decrypt } from '../src/index.js'
 import { EccKeys } from '@substrate-system/keys/ecc'
 
@@ -123,6 +123,34 @@ test('raw key of invalid length throws', async t => {
     }
 
     t.ok(threw, '24-byte raw key throws during seal')
+    t.ok(
+        /invalid aesKey length/.test(errorMessage),
+        'error message names the invalid length (not a WebCrypto error)'
+    )
+})
+
+test('CryptoKey exporting to invalid-length bytes throws', async t => {
+    const kp = await genKeypair()
+    // An HMAC key is a convenient cross-runtime way to get an
+    // extractable CryptoKey whose raw export is neither 16 nor 32
+    // bytes (AES-192 CryptoKey support is inconsistent across
+    // runtimes, so this exercises the same code path more reliably).
+    const badKey = await subtle.generateKey(
+        { name: 'HMAC', hash: 'SHA-256', length: 192 },
+        true,
+        ['sign', 'verify']
+    )
+
+    let threw = false
+    let errorMessage = ''
+    try {
+        await seal(kp, badKey as unknown as CryptoKey)
+    } catch (e) {
+        threw = true
+        if (e instanceof Error) errorMessage = e.message
+    }
+
+    t.ok(threw, '24-byte CryptoKey throws during seal')
     t.ok(
         /invalid aesKey length/.test(errorMessage),
         'error message names the invalid length (not a WebCrypto error)'
@@ -285,6 +313,76 @@ test('non-extractable key throws', async t => {
     t.ok(
         /raw bytes are what get sealed/.test(errorMessage),
         'error message contains guard message (not WebCrypto error)'
+    )
+})
+
+test('ephemeral encap keypair is generated non-extractable', async t => {
+    const kp = await genKeypair()
+    const originalGenerateKey = subtle.generateKey.bind(subtle)
+    let ephExtractable:boolean|null = null
+
+    // Spy on the real WebCrypto call (still delegates to it) to observe
+    // the `extractable` flag `seal` passes when generating the ephemeral
+    // X25519 keypair inside `encap`. That keypair never leaves the
+    // library, so this is the only way to check the flag from outside.
+    subtle.generateKey = (async (
+        alg:unknown,
+        extractable:boolean,
+        usages:string[]
+    ) => {
+        if (alg && (alg as { name?:string }).name === 'X25519') {
+            ephExtractable = extractable
+        }
+        return originalGenerateKey(alg as any, extractable, usages as any)
+    }) as typeof subtle.generateKey
+
+    try {
+        await seal(kp)
+    } finally {
+        subtle.generateKey = originalGenerateKey
+    }
+
+    t.equal(
+        ephExtractable,
+        false,
+        'ephemeral X25519 keypair is generated with extractable:false'
+    )
+})
+
+test('all-zero DH output is rejected', async t => {
+    const kp = await genKeypair()
+    const originalDeriveBits = subtle.deriveBits.bind(subtle)
+
+    // Simulate a nonconforming runtime returning an all-zero X25519
+    // shared secret (the Secure Curves spec requires deriveBits to throw
+    // on this small-order-point case; conforming runtimes never hit this
+    // path, so it can only be exercised by spying on deriveBits).
+    subtle.deriveBits = (async (
+        algorithm:unknown,
+        key:CryptoKey,
+        length:number
+    ) => {
+        if ((algorithm as { name?:string })?.name === 'X25519') {
+            return new ArrayBuffer(32)
+        }
+        return originalDeriveBits(algorithm as any, key, length)
+    }) as typeof subtle.deriveBits
+
+    let threw = false
+    let errorMessage = ''
+    try {
+        await seal(kp)
+    } catch (e) {
+        threw = true
+        if (e instanceof Error) errorMessage = e.message
+    } finally {
+        subtle.deriveBits = originalDeriveBits
+    }
+
+    t.ok(threw, 'all-zero shared secret is rejected')
+    t.ok(
+        /all-zero/.test(errorMessage),
+        'error message explains the all-zero shared secret'
     )
 })
 
@@ -570,6 +668,91 @@ test('encrypting the same message twice yields different envelopes',
     }
 )
 
+test('decrypt imports the message key non-extractable, decrypt-only',
+    async t => {
+        const kp = await genKeypair()
+        const envelope = await encrypt(kp, 'inspect me')
+
+        const originalImportKey = subtle.importKey.bind(subtle)
+        const aesImports:{ extractable:boolean; usages:string[] }[] = []
+
+        // Spy on the real WebCrypto call (still delegates to it) to observe
+        // every AES-GCM key import made while decrypting. The message key
+        // recovered inside `decryptBytes` never leaves the library, so this
+        // is the only way to check its extractable/usages flags from
+        // outside.
+        subtle.importKey = (async (
+            format:string,
+            keyData:BufferSource,
+            algorithm:unknown,
+            extractable:boolean,
+            usages:string[]
+        ) => {
+            if ((algorithm as { name?:string })?.name === 'AES-GCM') {
+                aesImports.push({ extractable, usages: [...usages] })
+            }
+            return originalImportKey(
+                format as any,
+                keyData,
+                algorithm as any,
+                extractable,
+                usages as any
+            )
+        }) as typeof subtle.importKey
+
+        try {
+            await decrypt(kp, envelope)
+        } finally {
+            subtle.importKey = originalImportKey
+        }
+
+        t.ok(aesImports.length > 0, 'decrypt imports at least one AES-GCM key')
+        t.ok(
+            aesImports.every(i => i.extractable === false),
+            'every AES-GCM key imported during decrypt is non-extractable'
+        )
+        t.ok(
+            aesImports.every(i =>
+                i.usages.length === 1 && i.usages[0] === 'decrypt'
+            ),
+            'every AES-GCM key imported during decrypt is decrypt-only'
+        )
+    }
+)
+
+test('encrypt.asString round-trips through fromString and decrypt (default encoding)',
+    async t => {
+        const kp = await genKeypair()
+        const str = await encrypt.asString(kp, 'hello asString')
+
+        const envelope = fromString(str, 'base64url')
+        const plaintext = await decrypt.asString(kp, envelope)
+        t.equal(
+            plaintext,
+            'hello asString',
+            'default base64url-encoded envelope round-trips'
+        )
+    }
+)
+
+test('encrypt.asString honors opts.encoding', async t => {
+    const kp = await genKeypair()
+    const str = await encrypt.asString(
+        kp,
+        'hex-encoded envelope',
+        null,
+        { encoding: 'hex' }
+    )
+
+    const envelope = fromString(str, 'hex')
+    const plaintext = await decrypt.asString(kp, envelope)
+    t.equal(
+        plaintext,
+        'hex-encoded envelope',
+        'hex-encoded envelope round-trips'
+    )
+})
+
 // ===== recipient key forms (public key, bytes, string) =====
 
 test('encrypt to a bare public CryptoKey', async t => {
@@ -667,6 +850,122 @@ test('a mismatched-encoding string recipient throws', async t => {
         threw = true
     }
     t.ok(threw, 'wrong-encoding string recipient rejected')
+})
+
+test('recipient with non-X25519 public key throws a clear error',
+    async t => {
+        const wrongAlgKeyPair = await subtle.generateKey(
+            { name: 'ECDSA', namedCurve: 'P-256' },
+            true,
+            ['sign', 'verify']
+        ) as CryptoKeyPair
+
+        let threw = false
+        let errorMessage = ''
+        try {
+            await encrypt(wrongAlgKeyPair.publicKey, 'nope')
+        } catch (e) {
+            threw = true
+            if (e instanceof Error) errorMessage = e.message
+        }
+
+        t.ok(threw, 'non-X25519 public key throws')
+        t.ok(
+            /X25519/.test(errorMessage),
+            'error message names the expected algorithm'
+        )
+    }
+)
+
+test('open with a non-X25519 private key throws a clear error',
+    async t => {
+        const kp = await genKeypair()
+        const { wrapped } = await seal(kp)
+
+        const wrongAlgKeyPair = await subtle.generateKey(
+            { name: 'ECDSA', namedCurve: 'P-256' },
+            true,
+            ['sign', 'verify']
+        ) as CryptoKeyPair
+
+        let threw = false
+        let errorMessage = ''
+        try {
+            await open(wrongAlgKeyPair, wrapped)
+        } catch (e) {
+            threw = true
+            if (e instanceof Error) errorMessage = e.message
+        }
+
+        t.ok(threw, 'non-X25519 private key throws')
+        t.ok(
+            /X25519/.test(errorMessage),
+            'error message names the expected algorithm'
+        )
+    }
+)
+
+// ===== known-answer (fixture) conformance test =====
+//
+// This fixture was generated once by an independent HPKE implementation
+// (@hpke/core, DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM,
+// base mode): a fixed X25519 keypair sealing a fixed 32-byte plaintext.
+// Every other test here is a round-trip against this library's own
+// seal/open, which cannot catch conformance drift (a wrong label, suite
+// ID, or kem_context ordering would pass every round-trip test while
+// silently breaking wire compatibility with every other HPKE
+// implementation). This test would catch that.
+const FIXTURE_PRIVATE_KEY_HEX =
+    '68a48becb31d1f341c665c50f99662a2a72a1127327c162a1931de6a4d096b46'
+const FIXTURE_PUBLIC_KEY_HEX =
+    '2a074c504427ec1c33beabb1d34a7dd2a16d5f5794cd089bebac02cefa2d5f1e'
+const FIXTURE_WRAPPED_HEX = (
+    'f67896035d433e451d5af78a1ac6693d06eca6ebec4ca7851fd06f85f7923079e' +
+    'd946ba24d1c0d3bbbe1438c8db7a4a966ea7c3a12e46ec4ecd06f0dc2483796a1' +
+    '64f01e1c9978614da7ef99b75039aa'
+)
+const FIXTURE_PLAINTEXT_HEX =
+    '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f'
+
+async function fixtureKeypair ():Promise<CryptoKeyPair> {
+    const publicKeyBytes = fromString(FIXTURE_PUBLIC_KEY_HEX, 'hex')
+    const privateJwk = {
+        kty: 'OKP',
+        crv: 'X25519',
+        d: toString(fromString(FIXTURE_PRIVATE_KEY_HEX, 'hex'), 'base64url'),
+        x: toString(publicKeyBytes, 'base64url')
+    }
+
+    const privateKey = await subtle.importKey(
+        'jwk',
+        privateJwk,
+        { name: 'X25519' },
+        false,
+        ['deriveBits']
+    )
+    const publicKey = await subtle.importKey(
+        'raw',
+        publicKeyBytes as BufferSource,
+        { name: 'X25519' },
+        true,
+        []
+    )
+
+    return { privateKey, publicKey }
+}
+
+test('known-answer: open.raw recovers a fixture envelope sealed by ' +
+    '@hpke/core',
+async t => {
+    const kp = await fixtureKeypair()
+    const wrapped = fromString(FIXTURE_WRAPPED_HEX, 'hex')
+    const recovered = await open.raw(kp, wrapped)
+
+    t.ok(
+        bytesEqual(recovered, fromString(FIXTURE_PLAINTEXT_HEX, 'hex')),
+        'recovers the known plaintext from an independently-generated ' +
+        'envelope'
+    )
 })
 
 test('all done', () => {

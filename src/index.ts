@@ -95,6 +95,7 @@ export async function seal (
         keyBytes = aesKey
     } else if (aesKey) {
         keyBytes = await exportAesKeyBytes(aesKey)
+        validateRawKeyBytes(keyBytes)
     } else {
         const keysize = opts?.keysize ?? 256
         validateKeysize(keysize)
@@ -218,11 +219,12 @@ async function decryptBytes (
     const iv = message.slice(ivStart, ctStart)
     const ciphertext = message.slice(ctStart)
 
-    const key = await open(
+    const keyBytes = await openRawBytes(
         keypair,
         wrapped,
         opts?.info !== undefined ? { info: opts.info } : undefined
     )
+    const key = await importAesKeyDecryptOnly(keyBytes)
     const pt = await subtle.decrypt(
         { name: 'AES-GCM', iv: iv as BufferSource },
         key,
@@ -291,6 +293,20 @@ async function importAesKey (raw:Uint8Array):Promise<CryptoKey> {
         { name: 'AES-GCM' },
         true,
         ['encrypt', 'decrypt']
+    )
+}
+
+// Used by `decryptBytes` instead of `importAesKey`: the message key never
+// leaves the library there, so it can be imported non-extractable and
+// decrypt-only rather than the extractable, both-usages key `open` returns
+// for general use.
+async function importAesKeyDecryptOnly (raw:Uint8Array):Promise<CryptoKey> {
+    return subtle.importKey(
+        'raw',
+        raw as BufferSource,
+        { name: 'AES-GCM' },
+        false,
+        ['decrypt']
     )
 }
 
@@ -441,6 +457,7 @@ async function resolveRecipientPublicKey (
         if (recipient.type !== 'public') {
             throw new Error('recipient CryptoKey must be a public key')
         }
+        assertX25519Algorithm(recipient, 'recipient CryptoKey')
         return recipient
     }
 
@@ -457,10 +474,22 @@ async function resolveRecipientPublicKey (
         if (pair.publicKey.type !== 'public') {
             throw new Error('recipient keypair publicKey must be a public key')
         }
+        assertX25519Algorithm(pair.publicKey, 'recipient keypair publicKey')
         return pair.publicKey
     }
 
     throw new Error('unrecognized recipient key form')
+}
+
+// Guards against an easy mistake (e.g. passing an Ed25519 signing key from
+// a library that exposes both): fail with a clear message here rather than
+// an opaque WebCrypto error later inside deriveBits.
+function assertX25519Algorithm (key:CryptoKey, context:string):void {
+    if (key.algorithm.name !== 'X25519') {
+        throw new Error(
+            `${context} must be an X25519 key (got ${key.algorithm.name})`
+        )
+    }
 }
 
 // X25519 Diffie-Hellman via WebCrypto deriveBits (works with a
@@ -474,7 +503,18 @@ async function dh (
         priv,
         256
     )
-    return new Uint8Array(bits)
+    const bytes = new Uint8Array(bits)
+
+    // The Secure Curves spec requires deriveBits to throw on an all-zero
+    // output (a small-order public key); conforming runtimes never reach
+    // here. Kept as defense-in-depth against a nonconforming runtime.
+    if (bytes.every(b => b === 0)) {
+        throw new Error(
+            'X25519 shared secret is all-zero (small-order public key?)'
+        )
+    }
+
+    return bytes
 }
 
 // DHKEM ExtractAndExpand: derive the KEM shared secret from the DH output
@@ -505,7 +545,7 @@ async function encap (
 ):Promise<{ sharedSecret:Uint8Array; enc:Uint8Array }> {
     const eph = await subtle.generateKey(
         { name: 'X25519' },
-        true,
+        false,
         ['deriveBits']
     ) as CryptoKeyPair
 
@@ -523,6 +563,11 @@ async function decap (
     enc:Uint8Array,
     keypair:CryptoKeyPair
 ):Promise<Uint8Array> {
+    if (keypair.privateKey.type !== 'private') {
+        throw new Error('keypair.privateKey must be a private key')
+    }
+    assertX25519Algorithm(keypair.privateKey, 'keypair.privateKey')
+
     const pkE = await subtle.importKey(
         'raw',
         enc as BufferSource,
@@ -639,7 +684,12 @@ async function aeadOpen (
  * @param message Plaintext to encrypt. A `string` is UTF-8 encoded.
  * @param aesKey Optional key, as either an AES-GCM `CryptoKey` or its raw
  *   bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key of
- *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable.
+ *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable. Each
+ *   call picks a fresh random 96-bit IV for the message ciphertext, so
+ *   reusing the same `aesKey` across many calls carries the standard
+ *   birthday bound for random nonces (collision risk becomes
+ *   non-negligible around 2^32 messages under one key, NIST SP 800-38D) --
+ *   prefer a fresh key per call (the default) over reusing one at scale.
  * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
  *   supplied) and `info` (bound into the HPKE key schedule).
  * @returns The concatenated envelope bytes.
@@ -682,7 +732,12 @@ async function encryptBytes (
  * @param message Plaintext to encrypt. A `string` is UTF-8 encoded.
  * @param aesKey Optional key, as either an AES-GCM `CryptoKey` or its raw
  *   bytes (`Uint8Array`, 16 or 32 bytes). Omit to generate a fresh key of
- *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable.
+ *   `opts.keysize` bits. A supplied `CryptoKey` MUST be extractable. Each
+ *   call picks a fresh random 96-bit IV for the message ciphertext, so
+ *   reusing the same `aesKey` across many calls carries the standard
+ *   birthday bound for random nonces (collision risk becomes
+ *   non-negligible around 2^32 messages under one key, NIST SP 800-38D) --
+ *   prefer a fresh key per call (the default) over reusing one at scale.
  * @param opts `keysize` (128/256, default 256; ignored when `aesKey` is
  *   supplied), `info` (bound into the HPKE key schedule), and `encoding`
  *   (the string encoding of the returned envelope; default `base64url`).
