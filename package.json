@@ -1,6 +1,6 @@
 {
   "name": "@substrate-system/simple-hpke",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Hybrid Public Key Encryption",
   "type": "module",
   "files": [
