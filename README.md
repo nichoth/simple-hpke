@@ -26,6 +26,8 @@ Hybrid Public Key Encryption
       - [`encrypt`](#encrypt)
       - [Encrypt to a string](#encrypt-to-a-string)
       - [`decrypt`](#decrypt)
+      - [`decrypt.asString`](#decryptasstring)
+      - [`decrypt.fromString`](#decryptfromstring)
 - [Modules](#modules)
   * [ESM](#esm)
   * [Common JS](#common-js)
@@ -72,7 +74,7 @@ const aesKey = await crypto.subtle.generateKey(
     ['encrypt', 'decrypt']
 )
 
-// if you pass in a key, the return value is just the wrapped key
+// pass in a key. The return value is just the wrapped key
 const { wrapped } = await seal(keypair, aesKey)
 
 // Later, recover the same key with your private key.
@@ -143,8 +145,12 @@ cipher text). `decrypt` reverses it, returning the plaintext bytes.
 
 >
 > [!NOTE]  
-> See `decrypt.asString` below for a convenient way to decrypt to a string.
-> See `encrypt.asString` for encrypting and ecoding to a string.
+> See [`decrypt.asString`](#decryptasstring) &
+> [`decrypt.fromString`](#decryptfromstring) below for a convenient way
+> to decrypt from a string.
+>
+> See [`encrypt.asString`](#encrypt-to-a-string) for encrypting and ecoding to
+> a string.
 >
 
 
@@ -236,7 +242,10 @@ The returned string encodes the same envelope `encrypt` returns, so the
 recipient decodes it with a matching decoder (here `fromString`) and passes the
 bytes to `decrypt` / `decrypt.asString`.
 
+
 ##### `decrypt`
+
+Descrypt the given data, return a `Uint8Array`.
 
 ```ts
 async function decrypt (
@@ -246,7 +255,30 @@ async function decrypt (
 ):Promise<Uint8Array>
 ```
 
+##### `decrypt.asString`
 
+Take a `Uint8Array`, return a sttring.
+
+```ts
+decrypt.asString = async function decryptToString (
+    keypair:CryptoKeyPair,
+    message:Uint8Array,
+    opts?:{ info?:Uint8Array|string }
+):Promise<string>
+```
+
+##### `decrypt.fromString`
+
+Take a `string` as input. Return either a string, or if `opts.buffer` is true,
+a`Uint8Array`.
+
+```ts
+decrypt.fromString = async function decryptFromString (
+    keypair:CryptoKeyPair,
+    message:string,
+    opts?:{ info?:Uint8Array|string, buffer?:boolean }
+):Promise<string|Uint8Array>
+```
 
 ---------------------------------------------------------------
 

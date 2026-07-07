@@ -183,11 +183,14 @@ export const encrypt = Object.assign(encryptBytes, {
 
 /**
  * Recover the AES key from an `encrypt` envelope and AES-GCM decrypt the
- * message. Call `decrypt(...)` for the plaintext bytes, or
- * `decrypt.asString(...)` to UTF-8 decode them to a string.
+ * message. Call `decrypt(...)` for the plaintext bytes,
+ * `decrypt.asString(...)` to UTF-8 decode them to a string, or
+ * `decrypt.fromString(...)` to decrypt a `base64url`-encoded envelope
+ * string (from `encrypt.asString`).
  */
 export const decrypt = Object.assign(decryptBytes, {
-    asString: decryptToString
+    asString: decryptToString,
+    fromString: decryptFromString
 })
 
 /**
@@ -249,6 +252,47 @@ async function decryptToString (
 ):Promise<string> {
     const bytes = await decryptBytes(keypair, message, opts)
     return new TextDecoder().decode(bytes)
+}
+
+/**
+ * Decode a `base64url` string envelope (from `encrypt.asString`),
+ * recover the AES key, and AES-GCM decrypt the message. Exposed as
+ * `decrypt.fromString`.
+ *
+ * @param keypair The same recipient `CryptoKeyPair` used to `encrypt`.
+ * @param message The `base64url`-encoded envelope string, as returned
+ *   by `encrypt.asString`.
+ * @param opts `info` (must match `encrypt`), and `buffer` -- if true,
+ *   return the raw plaintext `Uint8Array` instead of a UTF-8 decoded
+ *   string.
+ * @returns The decrypted plaintext, as a string (default) or
+ *   `Uint8Array` (if `opts.buffer` is true).
+ */
+async function decryptFromString (
+    keypair:CryptoKeyPair,
+    message:string,
+    opts?:{ info?:Uint8Array|string, buffer?:false }
+):Promise<string>
+
+async function decryptFromString (
+    keypair:CryptoKeyPair,
+    message:string,
+    opts:{ info?:Uint8Array|string, buffer:true }
+):Promise<Uint8Array>
+
+async function decryptFromString (
+    keypair:CryptoKeyPair,
+    message:string,
+    opts?:{ info?:Uint8Array|string, buffer?:boolean }
+):Promise<string|Uint8Array> {
+    const bytes = fromString(message, 'base64url')
+    const plaintext = await decryptBytes(
+        keypair,
+        bytes,
+        opts?.info !== undefined ? { info: opts.info } : undefined
+    )
+
+    return opts?.buffer ? plaintext : new TextDecoder().decode(plaintext)
 }
 
 function validateKeysize (keysize:number):void {

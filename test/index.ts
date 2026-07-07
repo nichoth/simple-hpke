@@ -753,6 +753,33 @@ test('encrypt.asString honors opts.encoding', async t => {
     )
 })
 
+test('decrypt.fromString round-trips an encrypt.asString envelope',
+    async t => {
+        const kp = await genKeypair()
+        const str = await encrypt.asString(kp, 'hello fromString')
+
+        const plaintext = await decrypt.fromString(kp, str)
+        t.equal(
+            plaintext,
+            'hello fromString',
+            'base64url envelope string decrypts to the original text'
+        )
+    }
+)
+
+test('decrypt.fromString honors opts.buffer', async t => {
+    const kp = await genKeypair()
+    const str = await encrypt.asString(kp, 'hello buffer')
+
+    const bytes = await decrypt.fromString(kp, str, { buffer: true })
+    t.ok(bytes instanceof Uint8Array, 'returns a Uint8Array')
+    t.equal(
+        new TextDecoder().decode(bytes),
+        'hello buffer',
+        'raw bytes decode to the original text'
+    )
+})
+
 // ===== recipient key forms (public key, bytes, string) =====
 
 test('encrypt to a bare public CryptoKey', async t => {
