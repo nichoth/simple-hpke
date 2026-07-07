@@ -24,7 +24,7 @@ Hybrid Public Key Encryption
   * [Hybrid Encryption](#hybrid-encryption)
     + [Encrypt / Decrypt](#encrypt--decrypt)
       - [`encrypt`](#encrypt)
-      - [Encrypt to a string](#encrypt-to-a-string)
+      - [`encrypt.asString`](#encryptasstring)
       - [`decrypt`](#decrypt)
       - [`decrypt.asString`](#decryptasstring)
       - [`decrypt.fromString`](#decryptfromstring)
@@ -56,8 +56,9 @@ Encrypt an AES key to yourself, then recover it later.
 ```ts
 import { seal, open } from 'simple-hpke'
 
-// An X25519 keypair. The private key can be non-extractable.
-// HPKE needs only `deriveBits`.
+// An X25519 keypair. (asymmetric keypair).
+// The private key can be non-extractable.
+// HPKE only needs `deriveBits`.
 const keypair = await crypto.subtle.generateKey(
     { name: 'X25519' },
     false,  // extractable
@@ -67,28 +68,34 @@ const keypair = await crypto.subtle.generateKey(
 // create a new AES key, and encrypt it to your public key.
 const { wrapped, key } = await seal(keypair)
 
-// Or wrap an existing AES key. The supplied key must be extractable.
+// Or wrap an existing AES key. The supplied AES key must be extractable.
 const aesKey = await crypto.subtle.generateKey(
     { name: 'AES-GCM', length: 256 },
     true,  // extractable
     ['encrypt', 'decrypt']
 )
 
-// pass in a key. The return value is just the wrapped key
+// pass in an existing key. The return value has the wrapped key.
 const { wrapped } = await seal(keypair, aesKey)
 
 // Later, recover the same key with your private key.
 const recoveredKey = await open(keypair, wrapped)
+
+// `recoveredKey` is equal to `aesKey`
 ```
 
 See [docs/README.md](./docs/README.md) for the full API and rationale.
 
+
+------------------------------------------------------
+
+
 ### Hybrid Encryption
 
-Seal a key, then use it to encrypt a message with AES-GCM.
-The wrapped key is concattenated with the cipher text, along with the
-IV. The recipient uses their private key to open the AES key and decrypt
-the message.
+Encrypt a message with AES-GCM, then encrypt the AES key to a given
+public key. The wrapped key is concattenated with the cipher text,
+along with the IV. The recipient uses their private key to open the AES key and
+decrypt the message.
 
 ```ts
 import { seal, open } from 'simple-hpke'
@@ -211,9 +218,9 @@ async function encrypt (
 ):Promise<Uint8Array>
 ```
 
-##### Encrypt to a string
+##### `encrypt.asString`
 
-`encrypt.asString` is `encrypt` with the envelope encoded to a string, handy
+`encrypt.asString` is `encrypt` with the envelope encoded to a string, useful
 for transports that carry text (JSON, URLs, headers). `opts.encoding` sets the
 string encoding. Default encoding is `base64url`.
 
