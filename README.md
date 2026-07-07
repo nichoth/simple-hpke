@@ -1,5 +1,5 @@
 # Simple HPKE
-[![tests](https://img.shields.io/github/actions/workflow/status/nichoth/simple-hpke/nodejs.yml?style=flat-square)](https://github.com/nichoth/simple-hpke/actions/workflows/nodejs.yml)
+[![tests](https://img.shields.io/github/actions/workflow/status/vanishing-page/simple-hpke/nodejs.yml?style=flat-square)](https://github.com/vanishing-page/simple-hpke/actions/workflows/nodejs.yml)
 [![types](https://img.shields.io/npm/types/simple-hpke?style=flat-square)](README.md)
 [![module](https://img.shields.io/badge/module-ESM%2FCJS-blue?style=flat-square)](README.md)
 [![semantic versioning](https://img.shields.io/badge/semver-2.0.0-blue?logo=semver&style=flat-square)](https://semver.org/)
