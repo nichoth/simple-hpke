@@ -1,11 +1,11 @@
 # Simple HPKE
 [![tests](https://img.shields.io/github/actions/workflow/status/nichoth/simple-hpke/nodejs.yml?style=flat-square)](https://github.com/nichoth/simple-hpke/actions/workflows/nodejs.yml)
-[![types](https://img.shields.io/npm/types/@substrate-system/simple-hpke?style=flat-square)](README.md)
+[![types](https://img.shields.io/npm/types/simple-hpke?style=flat-square)](README.md)
 [![module](https://img.shields.io/badge/module-ESM%2FCJS-blue?style=flat-square)](README.md)
 [![semantic versioning](https://img.shields.io/badge/semver-2.0.0-blue?logo=semver&style=flat-square)](https://semver.org/)
 [![Common Changelog](https://nichoth.github.io/badge/common-changelog.svg)](./CHANGELOG.md)
-[![install size](https://flat.badgen.net/packagephobia/install/@substrate-system/simple-hpke)](https://packagephobia.com/result?p=@substrate-system/simple-hpke)
-[![gzip size](https://flat.badgen.net/bundlephobia/minzip/@substrate-system/simple-hpke)](https://bundlephobia.com/package/@substrate-system/simple-hpke)
+[![install size](https://flat.badgen.net/packagephobia/install/simple-hpke)](https://packagephobia.com/result?p=simple-hpke)
+[![gzip size](https://flat.badgen.net/bundlephobia/minzip/simple-hpke)](https://bundlephobia.com/package/simple-hpke)
 [![license](https://img.shields.io/badge/license-Big_Time-blue?style=flat-square)](LICENSE)
 
 
@@ -42,7 +42,7 @@ Hybrid Public Key Encryption
 ## Install
 
 ```sh
-npm i -S @substrate-system/simple-hpke
+npm i -S simple-hpke
 ```
 
 ## Example
@@ -54,7 +54,7 @@ Wrap an AES key, or encrypt a message.
 Encrypt an AES key to yourself, then recover it later.
 
 ```ts
-import { seal, open } from '@substrate-system/simple-hpke'
+import { seal, open } from 'simple-hpke'
 
 // An X25519 keypair. The private key can be non-extractable.
 // HPKE needs only `deriveBits`.
@@ -91,7 +91,7 @@ IV. The recipient uses their private key to open the AES key and decrypt
 the message.
 
 ```ts
-import { seal, open } from '@substrate-system/simple-hpke'
+import { seal, open } from 'simple-hpke'
 
 const recipient = await crypto.subtle.generateKey(
     { name: 'X25519' },
@@ -155,10 +155,7 @@ cipher text). `decrypt` reverses it, returning the plaintext bytes.
 
 
 ```ts
-import {
-    encrypt,
-    decrypt
-} from '@substrate-system/simple-hpke'
+import { encrypt, decrypt } from 'simple-hpke'
 
 // need a public key for the recipient
 const recipient = await crypto.subtle.generateKey(
@@ -221,7 +218,7 @@ for transports that carry text (JSON, URLs, headers). `opts.encoding` sets the
 string encoding. Default encoding is `base64url`.
 
 ```ts
-import { encrypt, decrypt } from '@substrate-system/ecies'
+import { encrypt, decrypt } from 'simple-hpke'
 import { fromString } from 'uint8arrays'
 
 // recipient is any RecipientKey; keypair holds the matching private key
@@ -289,12 +286,12 @@ This exposes ESM and common JS via
 
 ### ESM
 ```js
-import { seal, open, encrypt, decrypt } from '@substrate-system/simple-hpke'
+import { seal, open, encrypt, decrypt } from 'simple-hpke'
 ```
 
 ### Common JS
 ```js
-require('@substrate-system/simple-hpke')
+require('simple-hpke')
 ```
 
 ### pre-built JS
@@ -303,7 +300,7 @@ accessible to your web server, then link to them in HTML.
 
 #### copy
 ```sh
-cp ./node_modules/@substrate-system/simple-hpke/dist/index.min.js ./public/hpke.min.js
+cp ./node_modules/simple-hpke/dist/index.min.js ./public/hpke.min.js
 ```
 
 #### HTML
