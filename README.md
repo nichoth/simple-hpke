@@ -68,14 +68,17 @@ const keypair = await crypto.subtle.generateKey(
 // Create a new AES key and encrypt it to your public key.
 const { enc, key } = await create(keypair)
 
+//
 // Or wrap an existing AES key. The supplied AES key must be extractable.
+//
+
 const aesKey = await crypto.subtle.generateKey(
     { name: 'AES-GCM', length: 256 },
     true,  // extractable
     ['encrypt', 'decrypt']
 )
 
-// Wrap an existing key.
+// Wrap the existing key.
 const { enc: sealedKey } = await seal(keypair, aesKey)
 
 // or pass in just a public key
@@ -152,7 +155,7 @@ This package exposes functions `encrypt` and `decrypt` which do the same thing.
 
 `encrypt` seals an AES key to the recipient, encrypts the message under
 that key, and returns a single envelope:
-`wrappedLen + wrapped + iv + ciphertext`
+`wrappedLen + wrappedKey + iv + ciphertext`
 (a 2-byte length prefix, the wrapped key, the 12-byte AES-GCM IV, and the
 cipher text). `decrypt` reverses it, returning the plaintext bytes.
 
