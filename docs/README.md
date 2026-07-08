@@ -159,6 +159,9 @@ The `enc` value returned by `create` and `seal` is the HPKE envelope:
 encapsulated_public_key(32 bytes) || ciphertext
 ```
 
+The X25519 encapsulated public key is always 32 bytes. The total `enc` length
+varies because the ciphertext contains the wrapped AES key plus the GCM tag.
+
 Its length is:
 
 - 64 bytes for a 128-bit AES key

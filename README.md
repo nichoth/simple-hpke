@@ -78,6 +78,8 @@ const aesKey = await crypto.subtle.generateKey(
 // Wrap an existing key.
 const { enc: sealedKey } = await seal(keypair, aesKey)
 
+// or pass in just a public key
+
 // Later, recover the same key with your private key.
 const recoveredKey = await open(keypair, sealedKey)
 
@@ -115,19 +117,22 @@ const ciphertextBuffer = await crypto.subtle.encrypt(
     new TextEncoder().encode('attack at dawn')
 )
 
-// Send `enc`, `iv`, and `ciphertext` together. `enc` is a fixed
-// 80 bytes for this suite, and the AES-GCM IV is 12 bytes, so the recipient
-// can slice the payload back apart at known offsets.
+// Send `enc`, `iv`, and `ciphertext` together. `create(...)` defaults to a
+// 256-bit AES key, so `enc.length` is 80 bytes in this example.
+//
+// If your protocol allows different wrapped-key sizes, prefix `enc.length`
+// (or otherwise transmit it) so the recipient can split the payload safely.
 const ciphertext = new Uint8Array(ciphertextBuffer)
-const message = new Uint8Array(enc.length + iv.length + ciphertext.length)
+const encLength = enc.length
+const message = new Uint8Array(encLength + iv.length + ciphertext.length)
 message.set(enc, 0)
-message.set(iv, enc.length)
-message.set(ciphertext, enc.length + iv.length)
+message.set(iv, encLength)
+message.set(ciphertext, encLength + iv.length)
 
 // On the other side, split the payload back into its parts.
-const enc2 = message.subarray(0, 80)
-const iv2 = message.subarray(80, 80 + 12)
-const ciphertext2 = message.subarray(80 + 12)
+const enc2 = message.subarray(0, encLength)
+const iv2 = message.subarray(encLength, encLength + 12)
+const ciphertext2 = message.subarray(encLength + 12)
 
 // Recover the key, then decrypt the message.
 const recovered = await open(recipient, enc2)
