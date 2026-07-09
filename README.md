@@ -89,8 +89,6 @@ const recoveredKey = await open(keypair, sealedKey)
 // `recoveredKey` is equal to `aesKey`
 ```
 
-See [docs/README.md](./docs/README.md) for the full API and rationale.
-
 
 ------------------------------------------------------
 
