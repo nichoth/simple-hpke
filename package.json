@@ -39,7 +39,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "uint8arrays": "^5.1.1"
+    "uint8arrays": "^6.1.1"
   },
   "devDependencies": {
     "@substrate-system/debug": "^0.9.64",
